@@ -16,6 +16,16 @@ description: 通过苹果原生商店链路完成 iCloud+ 订阅购买、关闭�
 
 本文的具体成功参数来自一次已完成购买的历史实测。HTTP 状态、放行率、令牌寿命及某个失败的归因都是该次观测，不能保证另一个账号或当前服务器具有相同行为。尤其不能仅凭一次 delegate 失败断言账号未激活；激活验收使用 `.claude/skills/icloud-mac-nac-activation/SKILL.md` 的有效 MME 与实时配额标准。
 
+WebUI 当前使用 `AuthenticateMatchedSkillStore` 建立签名购买会话；下文无签名 native/fast 入口是历史诊断路径，不应作为默认入口或自动回退。上游 [ipatool #525](https://github.com/majd/ipatool/pull/525) 已将认证改为当前 bag 指定的 SAP 签名流程。SAP 初始化成功只证明本地签名器可用，不能代替 Apple 返回有效 Store 身份。认证仍返回空响应或通用 HTML 时，不得宣称购买链路已经修复，也不能据此判定密码、验证码或付款方式错误。
+
+### 认证回归与当前验收边界
+
+旧入口 `AuthenticateStore` 与 matched-bag 入口不同：前者初始化签名器后仍可能选择历史无签名 native profile。不能仅凭函数名或 SAP 初始化成功，就称它为“签名 native 登录”。跳转到 legacy 地址时必须重新选择请求 profile，保留 POST、正文和 cookie，并对实际正文签名。无 Location 的 301/302 只允许在现有预算内重试；任何 429 或非成功响应的 `Retry-After` 都结束本次认证，不能把超出等待上限当成零秒重试。
+
+2026-11-07 对照包含私有仓库原入口、20 次 matched-bag 预算、ipatool 2.7.0，以及上游 `d9c0247` 的 Apple 原生框架认证实现。恢复次数、替换框架和仅针对检查程序的物理网卡直连均未建立 Store 会话。该结果说明这些改动尚未解决当前问题，不证明账号、密码、付款方式或代理就是根因。上游原生框架参考见 [ipatool #627](https://github.com/majd/ipatool/issues/627)；未通过实际认证的实验不得默认接入生产，也不得继续无依据增加重试。
+
+链路验收需要真实 Store 凭据、同账号绑定、实时方案与已有订阅读取全部通过。普通 iCloud 登录、SAP 自测及模拟回归测试都不能替代该验收。尚未取得 Store 会话时，必须明确报告购买预检查未通过。
+
 取得用户对精确套餐的购买授权后，从项目根目录运行：
 
 ```powershell
@@ -40,7 +50,7 @@ go build -o bin/icloudpurchase.exe ./tools/icloudpurchase
 
 凭据通过进程环境输入。所有输出路径必须位于仅当前用户可访问的 Git 忽略目录。`-local-store-code` 生成成功不代表商店接受；仅在 Apple 明确请求 2FA 后向同一会话附加新验证码。没有本账号已验证的本地码时使用新的用户设备码，不能借用其他账号的码。
 
-可用 `-store-check-only` 只验证商店认证，或用 `-store-session-in` 复用本账号和物理 GUID 绑定的有效商店 checkpoint。该模式最多执行 20 次认证路由尝试；应用错误及 429 停止，购买或不明确认响应不自动重放。
+可用 `-store-check-only` 只验证商店认证，或用 `-store-session-in` 复用本账号和物理 GUID 绑定的有效商店 checkpoint。共享认证函数默认每个传输会话最多执行 4 次请求，最后一次收到 Apple 验证挑战时额外允许一次验证码提交；应用错误、429 及 `Retry-After` 停止。WebUI 只允许在进入挑战之前、且仅收到路由错误时改用 Python 传输；已经进入挑战后不得通过重建会话回退。购买或不明确认响应不自动重放。
 
 ### 验证码时序与当前 bag 路径
 
@@ -51,6 +61,8 @@ SAP 登录必须使用同一份 Store bag 返回的三元组：`authenticateAcco
 Apple 已进入应用级 2FA challenge 后，同一个六位码必须在该 cookie 会话的纯路由重试中复用；204、无 `Location` 的 301/302、403/404/500/503 都没有消费验证码。验证码 provider 只读取一次，随后把该码保存在进程内，直到 Apple 返回应用响应、明确拒绝或会话结束；不能在每个路由响应后再次向用户要码。读取后的交接文件仍应立即删除，认证函数返回前清空内存副本。
 
 默认保持直连并显式禁用环境代理。如果用户明确授权临时代理，只把它接入 Store bag、SAP setup/certificate、authenticate 与后续 Store 请求的完整同一链路，不能出现 bag/签名直连而 authenticate 走代理的混合路径。本项目可用忽略目录中的 `.cache/store-proxy-10808.enabled` 临时启用 `127.0.0.1:10808`；购买和订阅/配额核验完成后立即删除该开关。代理认证仍不等于购买成功。
+
+签名器通过 `sap.Config.Client` 复用读取 bag、认证时的 HTTP 客户端，避免 SAP 初始化隐式读取系统环境代理。应用层禁用代理不代表绕过 TUN：网络对照需要核对实际路由，不能只检查 `HTTP_PROXY`。若临时改变系统网络模式，先取得用户对具体影响的确认，并在对照完成后恢复及核验原模式。
 
 `APPLESERVICES_SKILL_STORE_PROFILE=compact`、附加 `-signed-store` 或 `-appstore-profile` 是显式诊断选项，不是已验证的购买修复。当前目标曾在签名 App Store 对照收到空体 406/400，其他对照仍为通用空白/HTML 响应，均未取得商店令牌。不要把通用 HTTP 错误归因成密码或验证码错误，也不要重复同一失败实验而没有新证据。
 
@@ -121,9 +133,9 @@ plist 请求体：
 从响应取 `dsPersonId`（商店 DSID）与 `passwordToken`；从响应头取
 `X-Set-Apple-Store-Front` 和 `pod`。
 
-**苹果边缘会概率性丢弃该请求**（实测 `204` / `301` / `404` / `500` / `503` 混合，
-放行率约 1/10～1/20）。必须循环重试，成功标志是拿到 `dsPersonId` + `passwordToken`。
-`204` 表示被静默丢弃，**重试即可，不是验证码错误**。
+历史实测曾出现混合的 `204` / `301` / `404` / `500` / `503`，随后取得会话。
+该观测不能推导当前请求的放行率或保证重试有效；这些通用响应也不能确定验证码是否被处理。
+仅使用上文的有界认证重试。成功必须取得 `dsPersonId` + `passwordToken` 并校验账号绑定。
 
 把 `dsid` / `token` / `storefront` / `pod` / 全部 cookie 持久化到本地
 （本实现用 `session.json`），后续所有请求复用，避免重复登录消耗限流额度。
@@ -283,7 +295,7 @@ HTTP 401 ——需重新登录再核验，这不是取消失败。
 
 | 现象 | 含义 | 处理 |
 |---|---|---|
-| HTTP 204 / 301 / 404 / 500 / 503（登录） | 苹果边缘概率性丢弃 | 循环重试（放行率约 1/10–1/20） |
+| HTTP 204 / 301 / 404 / 500 / 503（登录） | 未取得有效应用响应，原因尚不明确 | 仅有界重试；仍失败则保留真实失败状态 |
 | `3038` `MZCommerce.TermsNotAccepted` | 未接受媒体服务条款 | 见第二步（需持久 jar + AppStore UA） |
 | `2002` `MZCommerce.BadPasswordToken` | 条款两步未共用同一 cookie jar | 改用一个持久 jar 重放 |
 | `2034` `MZCommerce.ExpiredPasswordToken` | 商店令牌过期 | 重新登录，非购买被拒 |

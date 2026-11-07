@@ -3,6 +3,7 @@ package appleservices
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Laky-64/appleservices/icloud"
@@ -12,6 +13,30 @@ type StorageInfo = icloud.StorageInfo
 type StoragePlanInfo = icloud.StoragePlanInfo
 type PurchaseTarget = icloud.PurchaseTarget
 type PurchaseResult = icloud.PurchaseResult
+
+// StorePurchaseSessionReady reports local, in-memory availability only. Apple
+// may still expire or reject the credentials on a subsequent request.
+func (l *Login) StorePurchaseSessionReady() bool {
+	return l != nil && !l.needsTwoFactor && l.client != nil && l.storeCommerce.MatchesAccount(l.client.DSID)
+}
+
+// InheritStorePurchaseSession preserves the original HTTP client, cookie jar
+// and physical Store identity after a fully authenticated same-account renewal.
+// It must not be used for a user-requested account validation or reconnection.
+// No commerce credential is serialized or copied to another account.
+func (l *Login) InheritStorePurchaseSession(previous *Login) bool {
+	if l == nil || l.needsTwoFactor || l.client == nil || !previous.StorePurchaseSessionReady() {
+		return false
+	}
+	if strings.TrimSpace(l.creds.AppleID) == "" || !strings.EqualFold(l.creds.AppleID, previous.creds.AppleID) ||
+		l.client.DSID != previous.client.DSID || l.client.ADSID == "" || l.client.ADSID != previous.client.ADSID {
+		return false
+	}
+	if l.storeCommerce == nil {
+		l.storeCommerce = previous.storeCommerce
+	}
+	return l.StorePurchaseSessionReady()
+}
 
 func (l *Login) PreviewStoragePurchase(ctx context.Context) (*icloud.StoreFormInfo, error) {
 	info, err := l.StoragePlanInfo(ctx)
@@ -79,15 +104,18 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 // SubmitSkillStoragePurchase submits one exact allowlisted offer, then
 // verifies both Apple's subscription detail and a fresh paid quota read.
 func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseTarget, expectedTerms string) (*PurchaseResult, error) {
+	if l.needsTwoFactor || l.client == nil {
+		return nil, &icloud.StorageError{Stage: "purchase-account-authentication-required"}
+	}
 	if !l.storeCommerce.MatchesAccount(l.client.DSID) {
-		return nil, errors.New("appleservices: Store session is unavailable")
+		return nil, &icloud.StorageError{Stage: "purchase-store-session", Hint: "local-session-unavailable"}
 	}
 	before, err := l.storeCommerce.ReadSkillSubscription(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if before.Present {
-		return nil, errors.New("appleservices: an iCloud+ subscription is already active")
+		return nil, &icloud.StorageError{Stage: "purchase-existing-subscription"}
 	}
 	plans, err := l.StoragePlanInfo(ctx)
 	if err != nil {
@@ -99,7 +127,7 @@ func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseT
 	}
 	subscription, err := l.storeCommerce.ReadSkillSubscription(ctx)
 	if err != nil || !subscription.MatchesTarget(target) {
-		return result, errors.New("appleservices: purchase returned but subscription verification is incomplete")
+		return result, &icloud.StorageError{Stage: "purchase-subscription-verification"}
 	}
 	for attempt := 0; attempt < 5; attempt++ {
 		quota, quotaErr := l.StorageInfo(ctx)
@@ -109,11 +137,11 @@ func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseT
 		}
 		select {
 		case <-ctx.Done():
-			return result, errors.New("appleservices: purchase returned but quota verification timed out")
+			return result, &icloud.StorageError{Stage: "purchase-quota-verification", Hint: "readback-timeout"}
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return result, errors.New("appleservices: purchase returned but paid quota is not active")
+	return result, &icloud.StorageError{Stage: "purchase-quota-verification", Hint: "paid-quota-not-active"}
 }
 
 // StorageInfo continues from this project's verified delegate session. It does

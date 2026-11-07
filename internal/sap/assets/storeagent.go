@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/Laky-64/appleservices/internal/sap/cachepath"
 	"os"
 	"path/filepath"
 )
@@ -51,7 +52,7 @@ func LoadStoreAgent(ctx context.Context) ([]byte, error) {
 }
 
 func storeAgentDirectory() (string, error) {
-	root, err := os.UserCacheDir()
+	root, err := cachepath.Root()
 	if err != nil {
 		return "", fmt.Errorf("find user cache directory: %w", err)
 	}

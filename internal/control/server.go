@@ -39,11 +39,12 @@ type Pending struct {
 	ReceivedAt time.Time `json:"received_at"`
 }
 type View struct {
-	Status       json.RawMessage `json:"status"`
-	Devices      []Device        `json:"devices"`
-	Pending      *Pending        `json:"pending"`
-	CodeReady    bool            `json:"code_ready"`
-	Capabilities []string        `json:"capabilities,omitempty"`
+	StoreSessionReady bool            `json:"store_session_ready"`
+	Status            json.RawMessage `json:"status"`
+	Devices           []Device        `json:"devices"`
+	Pending           *Pending        `json:"pending"`
+	CodeReady         bool            `json:"code_ready"`
+	Capabilities      []string        `json:"capabilities,omitempty"`
 }
 type Action struct {
 	Action    string `json:"action"`
@@ -117,15 +118,16 @@ type Command struct {
 	Reply   chan Result
 }
 type Server struct {
-	Record   Record
-	Commands chan Command
-	dir      string
-	listener net.Listener
-	http     *http.Server
-	mu       sync.Mutex
-	devices  []Device
-	pending  *Pending
-	ready    bool
+	Record     Record
+	Commands   chan Command
+	dir        string
+	listener   net.Listener
+	http       *http.Server
+	mu         sync.Mutex
+	devices    []Device
+	pending    *Pending
+	ready      bool
+	storeReady bool
 }
 
 func New(dir string) (*Server, error) {
@@ -161,9 +163,10 @@ func (s *Server) Close() {
 		os.Remove(path)
 	}
 }
-func (s *Server) SetDevices(devices []Device) { s.mu.Lock(); s.devices = devices; s.mu.Unlock() }
-func (s *Server) SetPending(pending *Pending) { s.mu.Lock(); s.pending = pending; s.mu.Unlock() }
-func (s *Server) SetReady(ready bool)         { s.mu.Lock(); s.ready = ready; s.mu.Unlock() }
+func (s *Server) SetDevices(devices []Device)     { s.mu.Lock(); s.devices = devices; s.mu.Unlock() }
+func (s *Server) SetPending(pending *Pending)     { s.mu.Lock(); s.pending = pending; s.mu.Unlock() }
+func (s *Server) SetReady(ready bool)             { s.mu.Lock(); s.ready = ready; s.mu.Unlock() }
+func (s *Server) SetStoreSessionReady(ready bool) { s.mu.Lock(); s.storeReady = ready; s.mu.Unlock() }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -182,7 +185,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
-		view := View{Status: data, Devices: s.devices, Pending: s.pending, CodeReady: s.ready, Capabilities: []string{"hide-my-email"}}
+		view := View{Status: data, Devices: s.devices, Pending: s.pending, CodeReady: s.ready, StoreSessionReady: s.storeReady, Capabilities: []string{"hide-my-email", "store-session-status", "storage-purchase-prepare"}}
 		s.mu.Unlock()
 		json.NewEncoder(w).Encode(view)
 		return
@@ -200,13 +203,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action.Action {
-	case "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
+	case "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-purchase-prepare-us", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
 	default:
 		http.Error(w, `{"message":"unknown action"}`, 400)
 		return
 	}
 	timeout := 90 * time.Second
-	if action.Action == "storage-skill-auth-file" {
+	if action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 		timeout = 3 * time.Minute
 	} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") {
 		timeout = 2 * time.Minute

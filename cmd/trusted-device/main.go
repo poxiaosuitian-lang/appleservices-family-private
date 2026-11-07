@@ -539,7 +539,16 @@ func run() (runErr error) {
 			status.save(*dir)
 			return control.Result{Message: "续登录失败，请检查登录状态"}
 		}
+		if previousLogin, ok := active.(*appleservices.Login); ok {
+			if renewedLogin, ok := renewed.(*appleservices.Login); ok {
+				renewedLogin.InheritStorePurchaseSession(previousLogin)
+			}
+		}
 		active = renewed
+		if panel != nil {
+			ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
+			panel.SetStoreSessionReady(ok && ready.StorePurchaseSessionReady())
+		}
 		status.State, status.Authenticated = "online", true
 		status.LastRefreshAt = time.Now().UTC()
 		status.RefreshCount++
@@ -577,6 +586,12 @@ func run() (runErr error) {
 		return hmeClient.List(actionCtx)
 	}
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string) control.Result {
+		defer func() {
+			if panel != nil {
+				ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
+				panel.SetStoreSessionReady(ok && ready.StorePurchaseSessionReady())
+			}
+		}()
 		if action == "hme-accept-terms" {
 			queryCtx, done := context.WithTimeout(actionCtx, 115*time.Second)
 			defer done()
@@ -845,6 +860,26 @@ func run() (runErr error) {
 			}
 			return control.Result{OK: true, Message: "实时验证码已在同一 Store 会话中通过；未提交购买", StoreAuthentication: info}
 		}
+		if action == "storage-purchase-prepare-us" {
+			preparer, ok := active.(interface {
+				PrepareSkillStoragePurchase(context.Context, appleservices.PurchaseTarget, func() (string, error)) (*appleservices.StoragePurchasePreparation, error)
+			})
+			if !ok {
+				return control.Result{Message: "请重新连接账号，加载支持购买预检查的后台", Stage: "worker-upgrade-required"}
+			}
+			queryCtx, done := context.WithTimeout(actionCtx, 3*time.Minute)
+			defer done()
+			target := appleservices.PurchaseTarget{Bytes: 50 * 1024 * 1024 * 1024, PriceMinor: 99, Currency: "USD", Period: "month"}
+			prepared, err := preparer.PrepareSkillStoragePurchase(queryCtx, target, func() (string, error) { return generateCode(queryCtx) })
+			if err != nil {
+				result := skillStoragePurchaseResult(nil, err)
+				if result.Stage == "purchase-verification" {
+					result.Message = "购买预检查未完成；未提交购买"
+				}
+				return result
+			}
+			return control.Result{OK: true, Stage: "purchase-prepared", Message: "购买会话、实时报价及现有订阅已检查；等待你确认，未提交购买", Storage: prepared.Storage, StoragePlan: prepared.Plans, StoreAuthentication: &icloud.StoreAuthenticationInfo{Ready: true}}
+		}
 		if action == "storage-skill-purchase-us" {
 			buyer, ok := active.(interface {
 				SubmitSkillStoragePurchase(context.Context, appleservices.PurchaseTarget, string) (*appleservices.PurchaseResult, error)
@@ -856,15 +891,7 @@ func run() (runErr error) {
 			defer done()
 			target := appleservices.PurchaseTarget{Bytes: 50 * 1024 * 1024 * 1024, PriceMinor: 99, Currency: "USD", Period: "month"}
 			purchase, err := buyer.SubmitSkillStoragePurchase(queryCtx, target, "290571")
-			if err != nil {
-				result := control.Result{Message: "美区购买或核验未完成；不得自动重试", Stage: "purchase"}
-				var failure *icloud.StorageError
-				if errors.As(err, &failure) {
-					result.Stage, result.HTTPStatus, result.AppleCode, result.AppleHint = failure.Stage, failure.HTTPStatus, failure.AppleCode, failure.Hint
-				}
-				return result
-			}
-			return control.Result{OK: true, Purchase: purchase, Message: "美区 50GB 订阅和付费配额均已核验", Stage: "purchase-completed"}
+			return skillStoragePurchaseResult(purchase, err)
 		}
 		if action == "family-info" || action == "family-add-self" || action == "family-join-storage" {
 			executable, execErr := os.Executable()

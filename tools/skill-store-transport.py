@@ -2,10 +2,8 @@
 import base64
 import json
 from pathlib import Path
-import plistlib
 import re
 import sys
-from html import escape
 from urllib.parse import urlsplit
 
 import requests
@@ -26,53 +24,18 @@ def main():
     endpoint = urlsplit(message["url"])
     allowed = endpoint.hostname in {
         "init.itunes.apple.com", "auth.itunes.apple.com",
-        "buy.itunes.apple.com", "speedysub.itunes.apple.com"
+        "buy.itunes.apple.com", "speedysub.itunes.apple.com",
+        "fpinit.itunes.apple.com", "s.mzstatic.com"
     } or re.fullmatch(r"p[0-9]+-buy\.itunes\.apple\.com", endpoint.hostname or "")
-    if endpoint.scheme != "https" or not allowed or endpoint.username or endpoint.fragment:
+    if endpoint.scheme != "https" or not allowed or endpoint.username or endpoint.fragment or endpoint.port not in (None, 443):
         raise ValueError("unsupported endpoint")
     headers = message["headers"]
     headers.pop("Content-Length", None)
     headers.pop("Accept-Encoding", None)
     data = base64.b64decode(message["body"] or "")
-    # Apple's native Store edge is sensitive to the historical Configurator
-    # XML shape. Preserve the six fields and their known order instead of the
-    # map order emitted by a generic plist encoder.
+    # Transport must preserve the exact URL and bytes signed by the caller.
+    # Re-encoding XML or fetching a new bag invalidates that signature binding.
     request_url = message["url"]
-    if endpoint.hostname == "auth.itunes.apple.com" and endpoint.path.rstrip("/") == "/auth/v1/native/fast":
-        values = plistlib.loads(data)
-        keys = ("appleId", "attempt", "guid", "password", "rmp", "why")
-        if set(values) != set(keys):
-            raise ValueError("unexpected Store login fields")
-        items = "\n".join(
-            f"<key>{key}</key><string>{escape(str(values[key]))}</string>" for key in keys
-        )
-        data = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
-                "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-                "<plist version=\"1.0\"><dict>\n" + items + "\n</dict></plist>").encode()
-        # The Go caller has already signed with the setup/certificate tuple
-        # from this bag. Preserve that bag's authenticateAccount endpoint too;
-        # mixing the legacy tuple with forced native/fast is rejected at the
-        # edge before Apple can evaluate the account.
-        bag_session = requests.Session()
-        configure_transport(bag_session)
-        with bag_session.get(
-            "https://init.itunes.apple.com/bag.xml",
-            params={"ix": "6", "guid": str(values["guid"])},
-            headers={"User-Agent": headers.get("User-Agent", ""), "Accept": "application/xml, text/xml, */*"},
-            timeout=20,
-        ) as bag_response:
-            if bag_response.status_code != 200:
-                raise ValueError("Store bag unavailable")
-            raw_auth = plistlib.loads(bag_response.content).get("authenticateAccount", "")
-        bag_session.close()
-        matched = urlsplit(raw_auth)
-        matched_allowed = matched.hostname in {"auth.itunes.apple.com", "buy.itunes.apple.com"} or re.fullmatch(
-            r"p[0-9]+-buy\.itunes\.apple\.com", matched.hostname or ""
-        )
-        if matched.scheme != "https" or not matched_allowed or matched.username or matched.fragment:
-            raise ValueError("unsupported matched Store endpoint")
-        request_url = raw_auth
     session = requests.Session()
     configure_transport(session)
     with session.request(

@@ -73,29 +73,31 @@ type Status struct {
 	FailureStage         string    `json:"failure_stage,omitempty"`
 }
 type view struct {
-	Status               Status                  `json:"status"`
-	Devices              []control.Device        `json:"devices"`
-	Pending              *control.Pending        `json:"pending"`
-	CodeReady            bool                    `json:"code_ready"`
-	ControlReady         bool                    `json:"control_ready"`
-	Launching            bool                    `json:"launching"`
-	Message              string                  `json:"message"`
-	Account              string                  `json:"account"`
-	LoginAccount         string                  `json:"login_account,omitempty"`
-	Accounts             []AccountView           `json:"accounts,omitempty"`
-	Selected             string                  `json:"selected,omitempty"`
-	ICloudActivated      bool                    `json:"icloud_activated"`
-	Family               *control.FamilyInfo     `json:"family,omitempty"`
-	FamilyCheckedAt      string                  `json:"family_checked_at,omitempty"`
-	FamilyStale          bool                    `json:"family_stale"`
-	Storage              *icloud.StorageInfo     `json:"storage,omitempty"`
-	StorageCheckedAt     string                  `json:"storage_checked_at,omitempty"`
-	StorageStale         bool                    `json:"storage_stale"`
-	StoragePlan          *icloud.StoragePlanInfo `json:"storage_plan,omitempty"`
-	StoragePlanCheckedAt string                  `json:"storage_plan_checked_at,omitempty"`
-	StoragePlanStale     bool                    `json:"storage_plan_stale"`
-	HideMyEmailAvailable bool                    `json:"hide_my_email_available"`
-	ActivationReady      bool                    `json:"activation_ready"`
+	PurchasePreparationAvailable bool                    `json:"purchase_preparation_available"`
+	StoreSessionReady            *bool                   `json:"store_session_ready,omitempty"`
+	Status                       Status                  `json:"status"`
+	Devices                      []control.Device        `json:"devices"`
+	Pending                      *control.Pending        `json:"pending"`
+	CodeReady                    bool                    `json:"code_ready"`
+	ControlReady                 bool                    `json:"control_ready"`
+	Launching                    bool                    `json:"launching"`
+	Message                      string                  `json:"message"`
+	Account                      string                  `json:"account"`
+	LoginAccount                 string                  `json:"login_account,omitempty"`
+	Accounts                     []AccountView           `json:"accounts,omitempty"`
+	Selected                     string                  `json:"selected,omitempty"`
+	ICloudActivated              bool                    `json:"icloud_activated"`
+	Family                       *control.FamilyInfo     `json:"family,omitempty"`
+	FamilyCheckedAt              string                  `json:"family_checked_at,omitempty"`
+	FamilyStale                  bool                    `json:"family_stale"`
+	Storage                      *icloud.StorageInfo     `json:"storage,omitempty"`
+	StorageCheckedAt             string                  `json:"storage_checked_at,omitempty"`
+	StorageStale                 bool                    `json:"storage_stale"`
+	StoragePlan                  *icloud.StoragePlanInfo `json:"storage_plan,omitempty"`
+	StoragePlanCheckedAt         string                  `json:"storage_plan_checked_at,omitempty"`
+	StoragePlanStale             bool                    `json:"storage_plan_stale"`
+	HideMyEmailAvailable         bool                    `json:"hide_my_email_available"`
+	ActivationReady              bool                    `json:"activation_ready"`
 }
 type credentials struct {
 	AppleID   string `json:"apple_id"`
@@ -438,7 +440,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	request.Header.Set("Content-Type", "application/json")
 	timeout := 95 * time.Second
 	if action, ok := body.(control.Action); ok {
-		if action.Action == "storage-skill-auth-file" {
+		if action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
 		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") {
 			timeout = 2*time.Minute + 5*time.Second
@@ -811,6 +813,10 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 			result.Devices = live.Devices
 			result.Pending = live.Pending
 			result.CodeReady = live.CodeReady
+			if slices.Contains(live.Capabilities, "store-session-status") {
+				result.StoreSessionReady = &live.StoreSessionReady
+			}
+			result.PurchasePreparationAvailable = slices.Contains(live.Capabilities, "storage-purchase-prepare")
 			result.HideMyEmailAvailable = slices.Contains(live.Capabilities, "hide-my-email")
 			result.ControlReady = true
 		}
@@ -818,13 +824,13 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 	return result
 }
 func (s *Server) Start(ctx context.Context, creds credentials) control.Result {
-	// Start acts on the account that owns the server's own directory. A
-	// registered account is started through startAccount so one account's
-	// credentials can never land in another account's directory.
+	// Existing accounts retain their identity. A fresh installation must create
+	// its first account and device binding before attempting Mac APS setup.
 	if account := s.lookup(""); account != nil {
 		return s.startAccount(ctx, account, creds)
 	}
-	return s.startIn(ctx, s.config.Dir, creds, nil)
+	result, _ := s.addAccount(ctx, creds)
+	return result
 }
 
 // startAccount starts one registered account inside its own directory.

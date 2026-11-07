@@ -174,7 +174,7 @@ func (c *Client) Start(ctx context.Context) error {
 	if err := build.Run(); err != nil {
 		return errors.New("nativeadi: transport isolation shim build failed")
 	}
-	command := exec.Command(c.config.Python, "-u", filepath.Join(directory, "helper.py"))
+	command := nativeHelperCommand(c.config.Python, filepath.Join(directory, "helper.py"))
 	backgroundexec.Configure(command)
 	// The helper needs no account secrets, including through inherited env vars.
 	command.Env = bridgeEnvironment()
@@ -229,6 +229,12 @@ func (c *Client) Start(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// Go's JSON pipe is UTF-8, independent of the Windows console code page.
+// Without explicit UTF-8 mode Python can corrupt non-ASCII library/profile paths.
+func nativeHelperCommand(python, helper string) *exec.Cmd {
+	return exec.Command(python, "-X", "utf8", "-u", helper)
 }
 
 func (c *Client) receive(ctx context.Context, id uint64) (reply, error) {

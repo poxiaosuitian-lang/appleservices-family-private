@@ -52,7 +52,7 @@ func (skillPythonTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if err != nil {
 		return nil, errors.New("cannot encode private request")
 	}
-	command := exec.CommandContext(req.Context(), "python", "tools/skill-store-transport.py")
+	command := exec.CommandContext(req.Context(), "python", "-X", "utf8", "-u", "tools/skill-store-transport.py")
 	backgroundexec.Configure(command)
 	command.Stdin = bytes.NewReader(input)
 	var output bytes.Buffer
@@ -140,7 +140,14 @@ func AuthenticateSignedSkillStore(ctx context.Context, appleID, password string,
 // AuthenticateMatchedSkillStore preserves the authenticate/setup/certificate
 // tuple returned by one Apple Store bag without process-global diagnostics.
 func AuthenticateMatchedSkillStore(ctx context.Context, appleID, password string, headers map[string]string, codeProvider func() (string, error)) (*StoreCommerceSession, error) {
-	session, err := authenticateSignedSkillStoreMode(ctx, appleID, password, headers, false, true, skillMatchedHTTPTransport(), codeProvider)
+	transport := skillMatchedHTTPTransport()
+	if os.Getenv("APPLESERVICES_SKILL_HTTP_PYTHON") == "1" {
+		transport = skillPythonTransport{}
+	}
+	session, err := authenticateSignedSkillStoreMode(ctx, appleID, password, headers, false, true, transport, codeProvider)
+	if ctx.Err() != nil {
+		return nil, &StorageError{Stage: "purchase-store-timeout"}
+	}
 	if err == nil || !storeRoutingFailure(err) || os.Getenv("APPLESERVICES_SKILL_HTTP_PYTHON") == "1" {
 		return session, err
 	}
@@ -150,7 +157,7 @@ func AuthenticateMatchedSkillStore(ctx context.Context, appleID, password string
 
 func storeRoutingFailure(err error) bool {
 	var failure *StorageError
-	if !errors.As(err, &failure) || failure.Stage != "purchase-store-authentication" {
+	if !errors.As(err, &failure) || failure.Stage != "purchase-store-authentication" || failure.Hint == "after-store-challenge" {
 		return false
 	}
 	switch failure.HTTPStatus {
@@ -191,7 +198,7 @@ func authenticateSignedSkillStoreMode(ctx context.Context, appleID, password str
 		bag.AuthEndpoint = u.String()
 	}
 	fmt.Printf("Apple bag Store endpoint: %s\n", safeEndpointLabel(u))
-	signer, err := sap.NewSigner(ctx, sap.Config{SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
+	signer, err := sap.NewSigner(ctx, sap.Config{Client: client, SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
 	if err != nil {
 		client.CloseIdleConnections()
 		return nil, &StorageError{Stage: "purchase-store-sap"}
@@ -209,7 +216,7 @@ func authenticateSkillStoreConfigured(ctx context.Context, client *http.Client, 
 }
 
 func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Client, endpoint, guid, appleID, password, agent string, headers map[string]string, signer sap.ActionSigner, referenceWire bool, codeProvider func() (string, error)) (*StoreCommerceSession, error) {
-	maxAttempts := 20
+	maxAttempts := 4
 	if raw := os.Getenv("APPLESERVICES_SKILL_AUTH_ATTEMPTS"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > 100 {
@@ -261,6 +268,9 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 		code = ""
 		if err != nil {
 			client.CloseIdleConnections()
+			if ctx.Err() != nil {
+				return nil, &StorageError{Stage: "purchase-store-timeout"}
+			}
 			return nil, &StorageError{Stage: "purchase-store-transport"}
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxStoreBagBytes+1))
@@ -290,6 +300,11 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 				if errors.As(err, &failure) && failure.Stage == "purchase-store-2fa" && codeProvider != nil {
 					if !needsCode {
 						needsCode = true
+						// An Apple-requested challenge is not a routing retry.
+						// Reserve one response even when it arrives on the last attempt.
+						if attempt == maxAttempts {
+							maxAttempts++
+						}
 						fmt.Println("Apple requests Store 2FA; continuing with the same cookie jar")
 						continue
 					}
@@ -304,6 +319,10 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 		if resp.StatusCode == 429 {
 			client.CloseIdleConnections()
 			return nil, &StorageError{Stage: "purchase-store-rate-limited", HTTPStatus: 429}
+		}
+		if resp.Header.Get("Retry-After") != "" {
+			client.CloseIdleConnections()
+			return nil, &StorageError{Stage: "purchase-store-backoff", HTTPStatus: resp.StatusCode}
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.Header.Get("Location") != "" {
 			if redirects >= 4 {
@@ -321,7 +340,7 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 		case 403:
 			if !strings.Contains(strings.ToLower(string(data)), "<html") || resp.Header.Get("Apple-Originating-System") != "" || resp.Header.Get("X-Responding-Instance") != "" {
 				client.CloseIdleConnections()
-				return nil, &StorageError{Stage: "purchase-store-authentication", HTTPStatus: 403}
+				return nil, &StorageError{Stage: "purchase-store-rejected", HTTPStatus: 403}
 			}
 		default:
 			client.CloseIdleConnections()
@@ -329,11 +348,15 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 		}
 		if attempt == maxAttempts {
 			client.CloseIdleConnections()
-			return nil, &StorageError{Stage: "purchase-store-authentication", HTTPStatus: resp.StatusCode}
+			failure := &StorageError{Stage: "purchase-store-authentication", HTTPStatus: resp.StatusCode}
+			if needsCode {
+				failure.Hint = "after-store-challenge"
+			}
+			return nil, failure
 		}
 		select {
 		case <-ctx.Done():
-			return nil, &StorageError{Stage: "purchase-store-authentication", HTTPStatus: resp.StatusCode}
+			return nil, &StorageError{Stage: "purchase-store-timeout"}
 		case <-time.After(time.Second):
 		}
 	}
@@ -430,6 +453,9 @@ func (s *StoreCommerceSession) skillRequest(ctx context.Context, method, endpoin
 		}
 	}
 	if resp.StatusCode != 200 {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			s.identity = nil
+		}
 		return data, resp.StatusCode, &StorageError{Stage: "purchase-skill-response", HTTPStatus: resp.StatusCode}
 	}
 	return data, resp.StatusCode, nil
@@ -505,8 +531,8 @@ func (s *StoreCommerceSession) SubmitSkillPurchase(ctx context.Context, info *St
 			return nil, err
 		}
 	}
-	if failure, ok := r["failureType"]; ok && fmt.Sprint(failure) != "" && fmt.Sprint(failure) != "0" {
-		return nil, &StorageError{Stage: "purchase-skill-buy", HTTPStatus: 200, AppleCode: fmt.Sprint(failure)}
+	if err := skillPurchaseRejection(r); err != nil {
+		return nil, err
 	}
 	if dialog, ok := r["dialog"].(map[string]any); ok {
 		action, _ := dialog["okButtonAction"].(map[string]any)
@@ -531,13 +557,43 @@ func (s *StoreCommerceSession) SubmitSkillPurchase(ctx context.Context, info *St
 			return nil, err
 		}
 	}
-	if failure, ok := r["failureType"]; ok && fmt.Sprint(failure) != "" && fmt.Sprint(failure) != "0" {
-		return nil, &StorageError{Stage: "purchase-skill-buy", HTTPStatus: 200, AppleCode: fmt.Sprint(failure)}
+	if err := skillPurchaseRejection(r); err != nil {
+		return nil, err
 	}
 	if r["jingleDocType"] == "purchaseSuccess" && r["jingleAction"] == "purchaseProduct" && fmt.Sprint(r["status"]) == "0" {
 		return &PurchaseResult{State: "completed", HTTPStatus: 200}, nil
 	}
 	return &PurchaseResult{State: "verification-pending", HTTPStatus: 200}, nil
+}
+
+// Retain only a numeric failure code and a coarse category. Messages, dialog
+// URLs and the rest of the authenticated response must not reach the dashboard.
+func skillPurchaseRejection(response map[string]any) error {
+	failure := response["failureType"]
+	if failure == nil || fmt.Sprint(failure) == "" || fmt.Sprint(failure) == "0" {
+		return nil
+	}
+	code := ""
+	if raw := fmt.Sprint(failure); len(raw) <= 12 {
+		if _, err := strconv.ParseInt(raw, 10, 32); err == nil {
+			code = raw
+		}
+	}
+	var messages []string
+	for _, key := range []string{"customerMessage", "failureMessage"} {
+		if value, ok := response[key].(string); ok {
+			messages = append(messages, value)
+		}
+	}
+	if dialog, ok := response["dialog"].(map[string]any); ok {
+		for _, key := range []string{"dialogId", "message", "title"} {
+			if value, ok := dialog[key].(string); ok {
+				messages = append(messages, value)
+			}
+		}
+	}
+	return &StorageError{Stage: "purchase-skill-buy", HTTPStatus: 200, AppleCode: code,
+		Hint: storeResponseHint([]byte(strings.Join(messages, "\n")), "")}
 }
 
 func safePurchaseField(v any) string {

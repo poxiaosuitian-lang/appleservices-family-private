@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"howett.net/plist"
 )
@@ -179,10 +178,7 @@ func TestStoreHardwareIdentitySkipsVirtualAdapters(t *testing.T) {
 	}
 }
 
-// TestRetryableStoreAuthStatus pins the statuses that mean "the request never
-// reached the application". A working App Store client retries exactly these,
-// and the endpoint answers them with no payload, so treating one as a
-// credential failure would report a broken login for a healthy account.
+// TestRetryableStoreAuthStatus keeps rate limiting out of the transient budget.
 func TestRetryableStoreAuthStatus(t *testing.T) {
 	cases := []struct {
 		status int
@@ -193,7 +189,7 @@ func TestRetryableStoreAuthStatus(t *testing.T) {
 		{301, false}, // handled as a redirect, not as a retry
 		{403, true},
 		{404, true},
-		{429, true},
+		{429, false},
 		{500, true},
 		{503, true},
 	}
@@ -201,29 +197,5 @@ func TestRetryableStoreAuthStatus(t *testing.T) {
 		if got := retryableStoreAuthStatus(c.status); got != c.want {
 			t.Errorf("retryableStoreAuthStatus(%d) = %v, want %v", c.status, got, c.want)
 		}
-	}
-}
-
-func TestStoreAuthRetryAfter(t *testing.T) {
-	header := func(value string) http.Header {
-		h := http.Header{}
-		if value != "" {
-			h.Set("Retry-After", value)
-		}
-		return h
-	}
-	now := time.Now()
-	if got := storeAuthRetryAfter(header("1"), now); got != time.Second {
-		t.Errorf("seconds form = %v, want 1s", got)
-	}
-	// A wait beyond the cap ends the login instead of retrying early.
-	if got := storeAuthRetryAfter(header("120"), now); got != 0 {
-		t.Errorf("over-cap seconds = %v, want 0", got)
-	}
-	if got := storeAuthRetryAfter(header(""), now); got != 0 {
-		t.Errorf("absent header = %v, want 0", got)
-	}
-	if got := storeAuthRetryAfter(header("not-a-delay"), now); got != 0 {
-		t.Errorf("garbage value = %v, want 0", got)
 	}
 }

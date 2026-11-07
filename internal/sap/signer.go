@@ -3,7 +3,9 @@ package sap
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"time"
 )
 
 const supportedVersion = uint32(200)
@@ -11,10 +13,23 @@ const supportedVersion = uint32(200)
 var errSignerClosed = errors.New("SAP signer is closed")
 
 type Config struct {
+	// Client is the same network client used for the Store bag and login.
+	// Sharing it preserves proxy policy, transport and cookie session.
+	Client         *http.Client
 	SetupURL       string
 	CertificateURL string
 	Version        uint32
 	HardwareID     []byte
+}
+
+func setupClient(config Config) *http.Client {
+	if config.Client != nil {
+		return config.Client
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{Transport: transport, Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 type ActionSigner interface {

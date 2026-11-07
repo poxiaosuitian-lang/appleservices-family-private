@@ -14,6 +14,7 @@
   <span class="nav-label">工作空间</span>
   <nav>
     <a href="#overview" class="nav-item selected"><span class="nav-icon">◫</span>概览<span class="nav-marker"></span></a>
+    <a href="#icloud" class="nav-item nav-icloud" aria-label="iCloud+ 开通与储存" title="iCloud+ 开通与储存"><span class="nav-icon">☁</span>iCloud+</a>
     <a href="#devices" class="nav-item"><span class="nav-icon">▱</span>我的设备<span class="nav-count" id="navCount">—</span></a>
     <a href="#requests" class="nav-item"><span class="nav-icon">◇</span>登录请求<span class="request-dot" id="requestDot" hidden></span></a>
   </nav>
@@ -29,6 +30,12 @@
 <main id="overview">
   <header class="page-header"><div><div class="eyebrow">你的 Apple 工作空间</div><h1>设备与登录<span class="heading-dot">.</span></h1><p>在一处管理设备身份、登录状态和验证码。</p></div><div class="header-actions"><span class="local-badge"><span></span>本机面板</span><button class="icon-button" id="reloadView" aria-label="刷新状态" title="刷新状态">↻</button></div></header>
   <div id="notice" class="notice" role="status" hidden></div>
+  <section class="request-card icloud-only icloud-intro">
+    <div class="card-title-row"><div><span class="card-kicker">订阅与容量</span><h2>开通 iCloud+</h2></div><a class="button button-light" id="icloudLoginLink" href="#overview">前往连接账户</a></div>
+    <p class="card-description">美区 50GB：点击开通 → 自动检查容量、报价与购买会话 → 由你确认订阅 → 核验付费容量。</p>
+    <p class="card-description" id="icloudAccessHint" role="status">正在读取账户状态…</p>
+    <p class="cache-note">当前支持 50GB 方案，以 Apple 返回并核验的报价为准。确认订阅会产生真实扣款并自动续费。</p>
+  </section>
   <section class="top-grid overview-only">
     <article class="session-card">
       <div class="session-top"><span class="card-kicker">登录状态</span><span class="status-badge" id="statusBadge"><i></i>正在读取</span></div>
@@ -39,7 +46,8 @@
     <article class="code-card"><div class="card-title-row"><div><span class="card-kicker dark">身份验证</span><h2>本机验证码</h2></div><span class="shield-icon">◇</span></div><p class="card-description">用于你正在进行的 Apple 账户登录。</p><div class="code-display" id="codeDisplay" aria-live="polite">••• <span>•••</span></div><div class="code-detail" id="codeDetail">登录后可生成六位验证码</div><div class="code-actions"><button class="button button-primary" id="codeButton" disabled>显示验证码<span>→</span></button><button class="copy-button" id="copyButton" aria-label="复制验证码" title="复制验证码" disabled>⧉</button></div><div class="code-footer"><span class="lock-icon">▣</span>仅手动显示，不写入运行日志</div></article>
   </section>
   <div class="notice overview-only" id="capabilityNotice" role="status" hidden></div>
-  <section class="request-card overview-only"><div class="card-title-row"><h3>iCloud 储存空间</h3><button class="text-button" id="storageButton" disabled>查询储存空间</button></div><p id="storageSummary" class="card-description">登录后查询当前容量和使用情况。</p><p id="storageCacheNote" class="cache-note">尚无本地状态</p></section>
+  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud 储存空间</h3><button class="text-button" id="storageButton" disabled>查询储存空间</button></div><p id="storageSummary" class="card-description">登录后查询当前容量和使用情况。</p><p id="storageCacheNote" class="cache-note">尚无本地状态</p></section>
+  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud+ 开通与方案</h3><div class="commerce-actions"><button class="text-button" id="planButton" disabled>读取可购方案</button><button class="text-button" id="storeAuthButton" disabled>验证购买会话</button><button class="button button-primary" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button></div></div><p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p><p id="purchaseAvailability" class="card-description" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p><p id="planCacheNote" class="cache-note">尚无本地状态</p><p id="storeAuthSummary" class="card-description">购买会话尚未验证 · 临时会话不会持久化</p><p id="purchaseResult" class="card-description" role="status" hidden></p><div class="payment-help"><p class="card-description">付款准备：如果账户还没有可用付款方式，请先在 Apple 官方页面添加。付款方式须适用于该账号所在地区；完成后回到面板核对容量和方案，再由你确认订阅。</p><p class="card-description"><a id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">前往 Apple 账户管理付款方式 ↗</a> · <a href="https://support.apple.com/zh-cn/118429" target="_blank" rel="noopener noreferrer">查看官方添加付款方式说明 ↗</a></p></div><div id="planList" class="plan-list"></div></section>
   <section class="request-card overview-only family-card" id="familyCard">
     <div class="card-title-row"><div><h3>家庭共享</h3><p class="card-description">查看成员资格，并把当前账号加入池内母号的共享 iCloud+。</p></div><div class="family-head-actions"><span id="familyCacheNote">尚无本地状态</span><button class="text-button" id="familyRefreshButton" disabled>读取 Apple 状态</button></div></div>
     <div class="family-status" id="familyStatus"><span class="family-state-dot"></span><div class="family-status-copy"><strong id="familySummary">尚未读取家庭状态</strong><p id="familyDetail">操作前会实时核对成员、组织者和共享储存状态。</p></div><span class="family-status-chip" id="familyStatusChip">待读取</span></div>
@@ -77,7 +85,7 @@
     <div class="hme-list" id="hmeList"><div class="hme-empty">尚未读取当前子号的地址</div></div>
     <button class="text-button hme-more" id="hmeMoreButton" hidden>显示更多</button>
   </section>
-  <section class="request-card overview-only"><div class="card-title-row"><h3>iCloud+ 方案</h3><div class="commerce-actions"><button class="text-button" id="planButton" disabled>读取可购方案</button><button class="text-button" id="storeAuthButton" disabled>验证购买会话</button><button class="text-button" id="purchaseButton" disabled>提交 50GB 方案</button></div></div><p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p><p id="planCacheNote" class="cache-note">尚无本地状态</p><p id="storeAuthSummary" class="card-description">购买会话尚未验证 · 临时会话不会持久化</p><form id="storeAuthForm" hidden><input id="storeCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Apple Store 六位验证码" aria-label="Apple Store 六位验证码" required><button class="text-button" type="submit">完成购买会话验证</button></form><div id="planList" class="plan-list"></div></section>
+
   <section class="verification-banner overview-only" id="smsPanel" hidden><div><span class="card-kicker dark">首次登录验证</span><h3>输入手机号收到的短信验证码</h3><p>验证码已发送到账户绑定的手机号。</p></div><form id="smsForm"><input id="smsCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="六位短信验证码" aria-label="六位短信验证码" required><button class="button button-primary" type="submit">验证并登录</button><button class="quiet-button dark-text" type="button" id="resendButton">重发短信</button></form></section>
   <section class="request-card overview-only" id="activationCard" hidden><div class="card-title-row"><div><span class="card-kicker">iCloud 激活</span><h3>完成条款与 Mac NAC 验收</h3></div><span class="subtle-tag" id="activationState">待检查</span></div><p id="activationSummary" class="card-description">账号验证码会话已保存；检查 Apple 当前条款后可在此继续激活。</p><p id="activationVersions" class="cache-note" hidden></p><div class="commerce-actions"><a class="text-button" id="activationICloudTerms" target="_blank" rel="noopener" hidden>查看 iCloud 条款 ↗</a><a class="text-button" id="activationMediaTerms" target="_blank" rel="noopener" hidden>查看媒体服务条款 ↗</a><button class="text-button" id="activationCheckButton">检查激活状态</button><button class="button button-primary" id="activationAcceptButton" hidden>同意条款并继续激活</button></div></section>
   <section class="verification-banner overview-only" id="pairingPanel" hidden><div><span class="card-kicker dark">设备配对验证</span><h3>输入受信任设备显示的配对码</h3><p>项目通过 APS 和 GSA 完成证明交换，不启动官方客户端。</p></div><form id="pairingForm"><input id="pairingCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="六位配对码" aria-label="六位配对码" required><button class="button button-primary" type="submit">发送配对证明</button></form></section>

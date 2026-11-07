@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sync"
-	"time"
 
 	"github.com/Laky-64/appleservices/internal/sap/assets"
 	"github.com/Laky-64/appleservices/internal/sap/machine"
@@ -60,7 +58,7 @@ func NewSigner(ctx context.Context, config Config) (ActionSigner, error) {
 		return nil, fmt.Errorf("initialize Apple SAP session: %w", err)
 	}
 
-	protocol := setupProtocol{client: &http.Client{Timeout: 30 * time.Second}}
+	protocol := setupProtocol{client: setupClient(config)}
 
 	certificate, err := protocol.certificate(ctx, config.CertificateURL)
 	if err != nil {

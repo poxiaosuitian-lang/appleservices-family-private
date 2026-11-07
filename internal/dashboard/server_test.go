@@ -70,10 +70,19 @@ func TestDashboardFiltersRuntimeSecretsAndBindsDaemonPID(t *testing.T) {
 		t.Fatal("state write failed")
 	}
 	controller.SetDevices([]control.Device{{Name: "test-device", Installation: true}})
+	controller.SetStoreSessionReady(true)
 	result := server.snapshot(context.Background())
 	encoded, _ := json.Marshal(result)
 	if !result.ControlReady || len(result.Devices) != 1 || strings.Contains(string(encoded), "do-not-disclose") {
 		t.Fatal("public state leaked or live daemon was not attached")
+	}
+	if result.StoreSessionReady == nil || !*result.StoreSessionReady {
+		t.Fatal("live commerce availability was not exposed")
+	}
+	controller.SetStoreSessionReady(false)
+	result = server.snapshot(context.Background())
+	if result.StoreSessionReady == nil || *result.StoreSessionReady {
+		t.Fatal("cleared commerce availability remained ready")
 	}
 	record := controller.Record
 	record.PID++

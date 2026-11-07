@@ -339,9 +339,9 @@ func validStoreRedirect(base, location string) (string, error) {
 	return dest.String(), nil
 }
 
-// authenticateStoreWithSAP performs the signed native Store login and keeps
-// the resulting MZFinance cookies in the caller's jar. It signs only the
-// plist request body; credentials never enter logs or error strings.
+// authenticateStoreWithSAP prepares SAP for the legacy entry point and keeps
+// its cookies in the caller's jar. The selected native compatibility profile
+// may omit the signature; the matched-bag entry point always signs its body.
 func authenticateStoreWithSAP(ctx context.Context, client *http.Client, appleID, password, code string, headers map[string]string) (*storeSession, error) {
 	guid, hardware, err := storeHardwareIdentity()
 	if err != nil {
@@ -351,7 +351,7 @@ func authenticateStoreWithSAP(ctx context.Context, client *http.Client, appleID,
 	if err != nil {
 		return nil, &StorageError{Stage: "purchase-store-bag"}
 	}
-	signer, err := sap.NewSigner(ctx, sap.Config{SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
+	signer, err := sap.NewSigner(ctx, sap.Config{Client: client, SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
 	if err != nil {
 		return nil, &StorageError{Stage: "purchase-store-sap"}
 	}
@@ -470,7 +470,7 @@ func authenticateStoreForHardwareMode(ctx context.Context, appleID, password, co
 	}
 	var signer sap.ActionSigner
 	if nativeSignature {
-		signer, err = sap.NewSigner(ctx, sap.Config{SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
+		signer, err = sap.NewSigner(ctx, sap.Config{Client: client, SetupURL: bag.SetupURL, CertificateURL: bag.CertificateURL, Version: bag.Version, HardwareID: hardware})
 		if err != nil {
 			client.CloseIdleConnections()
 			return nil, &StorageError{Stage: "purchase-store-sap"}
@@ -538,13 +538,8 @@ func decodeStoreLogin(body []byte, status int, header http.Header) (*storeSessio
 	return &storeSession{DSID: result.DSID, PasswordToken: result.PasswordToken, StoreFront: header.Get("X-Set-Apple-Store-Front"), Pod: strings.TrimSpace(header.Get("pod"))}, nil
 }
 
-// storeAuthAttempts bounds how many times a store login is sent before giving
-// up. The edge in front of the authentication endpoint answers a request it
-// cannot route with a bare 204, a 301 to an HTML body, a 403, a 404 or a 5xx —
-// all with no usable payload. Those are the same statuses a working App Store
-// client treats as transient and retries, and the share of requests that reach
-// the application is small and varies widely, so one attempt almost always
-// loses the draw.
+// storeAuthAttempts bounds the legacy entry point's routing retries. A generic
+// HTTP response does not establish why authentication failed.
 const storeAuthAttempts = 12
 
 // storeAuthRetryDelay and storeAuthRetryCap pace the retries. The edge's
@@ -555,35 +550,15 @@ const (
 	storeAuthRetryCap   = 2 * time.Second
 )
 
-// retryableStoreAuthStatus reports whether a status means the request never
-// reached the application. Only a 200 carries an application answer; every
-// other status is routing noise that says nothing about the credentials.
+// retryableStoreAuthStatus identifies candidate transient responses. Callers
+// must honor server backoff before retrying; these statuses do not prove that
+// the server never processed the request.
 func retryableStoreAuthStatus(status int) bool {
 	switch status {
-	case http.StatusNoContent, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests:
+	case http.StatusNoContent, http.StatusForbidden, http.StatusNotFound:
 		return true
 	}
 	return status/100 == 5
-}
-
-// storeAuthRetryAfter honors an explicit Retry-After when Apple sends one.
-func storeAuthRetryAfter(header http.Header, now time.Time) time.Duration {
-	value := strings.TrimSpace(header.Get("Retry-After"))
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
-		if seconds > uint64(storeAuthRetryCap/time.Second) {
-			return 0
-		}
-		return time.Duration(seconds) * time.Second
-	}
-	if date, err := http.ParseTime(value); err == nil {
-		if wait := date.Sub(now); wait > 0 && wait <= storeAuthRetryCap {
-			return wait
-		}
-	}
-	return 0
 }
 
 func authenticateSignedStore(ctx context.Context, client *http.Client, endpoint, appleID, password, code, guid string, headers map[string]string, signer sap.ActionSigner) (*storeSession, error) {
@@ -598,12 +573,11 @@ func authenticateSignedStoreConfigured(ctx context.Context, client *http.Client,
 	if code != "" && (len(code) != 6 || strings.IndexFunc(code, func(r rune) bool { return r < '0' || r > '9' }) != -1) {
 		return nil, &StorageError{Stage: "purchase-store-code"}
 	}
-	// The native /auth/v1/native/fast/ endpoint mints the store session from
-	// the plist body itself; the SAP action signature belongs to the legacy
-	// MZFinance authenticate endpoint only.
-	modernAuth := isModernStoreAuthEndpoint(endpoint)
+	// Preserve the explicitly selected historical profile, but re-evaluate it
+	// after every validated redirect so a legacy destination is always signed.
 	routeRetries := 0
 	for attempt, redirects := 1, 0; ; {
+		modernAuth := isModernStoreAuthEndpoint(endpoint)
 		body, err := plistLoginAttemptBody(appleID, password+code, guid, attempt)
 		if err != nil {
 			return nil, &StorageError{Stage: "purchase-store-sap"}
@@ -624,9 +598,8 @@ func authenticateSignedStoreConfigured(ctx context.Context, client *http.Client,
 			return nil, &StorageError{Stage: "purchase-store-authentication"}
 		}
 		if modernAuth {
-			// The native endpoint takes the identity from the plist body and
-			// the Configurator agent alone; the legacy anisette, accept and
-			// signature headers belong to the MZFinance flow.
+			// Keep the historical native profile only when explicitly selected.
+			// This is not evidence that current Apple endpoints omit SAP.
 			req.Header.Set("User-Agent", storeNativeUserAgent)
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		} else {
@@ -673,10 +646,16 @@ func authenticateSignedStoreConfigured(ctx context.Context, client *http.Client,
 				return nil, &StorageError{Stage: "purchase-store-private-diagnostic"}
 			}
 		}
+		if status == http.StatusTooManyRequests {
+			return nil, &StorageError{Stage: "purchase-store-rate-limited", HTTPStatus: status}
+		}
+		if status != http.StatusOK && strings.TrimSpace(resp.Header.Get("Retry-After")) != "" {
+			return nil, &StorageError{Stage: "purchase-store-backoff", HTTPStatus: status}
+		}
 		if status >= 300 && status < 400 {
-			// A bare redirect has no navigation to follow. In the explicitly
-			// bounded account-Mac mode, retry authentication routing only.
-			if strings.TrimSpace(location) == "" && retryLimit <= 3 && routeRetries < retryLimit {
+			// A bare 301/302 has no destination. Apply the same bounded routing
+			// budget to both the regular and hardware-specific entry points.
+			if (status == 301 || status == 302) && strings.TrimSpace(location) == "" && routeRetries < retryLimit {
 				routeRetries++
 				select {
 				case <-ctx.Done():
@@ -696,17 +675,13 @@ func authenticateSignedStoreConfigured(ctx context.Context, client *http.Client,
 			continue
 		}
 		if status == http.StatusNoContent || status < 200 || status >= 300 {
-			// A retryable status means the request never reached the
-			// application, so it is resent unchanged rather than reported as a
-			// credential failure.
+			// Retry candidate transient responses within the caller's budget.
+			// Without an application response, the failure cause is unknown.
 			if status != http.StatusTooManyRequests && retryableStoreAuthStatus(status) && routeRetries < retryLimit {
 				routeRetries++
 				delay := storeAuthRetryDelay << min(routeRetries-1, 3)
 				if delay > storeAuthRetryCap {
 					delay = storeAuthRetryCap
-				}
-				if requested := storeAuthRetryAfter(resp.Header, time.Now()); requested > 0 {
-					delay = requested
 				}
 				select {
 				case <-ctx.Done():

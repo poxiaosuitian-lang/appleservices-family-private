@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Laky-64/appleservices/internal/sap/cachepath"
 	"io"
 	"io/fs"
 	"net/http"
@@ -197,7 +198,7 @@ func downloadFiles(ctx context.Context, specs []fileSpec, operation string) (map
 }
 
 func cacheDirectory() (string, error) {
-	root, err := os.UserCacheDir()
+	root, err := cachepath.Root()
 	if err != nil {
 		return "", fmt.Errorf("find user cache directory: %w", err)
 	}

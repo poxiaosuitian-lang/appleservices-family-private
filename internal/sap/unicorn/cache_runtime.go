@@ -5,8 +5,8 @@ package unicorn
 import (
 	"context"
 	"fmt"
+	"github.com/Laky-64/appleservices/internal/sap/cachepath"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -30,7 +30,7 @@ func cachedRuntimePaths(ctx context.Context) (runtimePaths, error) {
 		return runtimePaths{}, err
 	}
 
-	cache, err := os.UserCacheDir()
+	cache, err := cachepath.Root()
 	if err != nil {
 		return runtimePaths{}, fmt.Errorf("locate user cache: %w", err)
 	}

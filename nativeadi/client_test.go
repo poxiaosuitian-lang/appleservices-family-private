@@ -2,6 +2,7 @@ package nativeadi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -13,6 +14,34 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func TestNativeHelperReadsUTF8PathsWithLegacyPythonDefault(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		t.Skip("Python is not installed")
+	}
+	t.Setenv("PYTHONUTF8", "0")
+	dir := filepath.Join(t.TempDir(), "游戏")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(dir, "helper.py")
+	source := "import json, sys\nrequest = json.loads(sys.stdin.readline())\nassert request['profile'] == sys.argv[1]\nprint('ok')\n"
+	if err := os.WriteFile(helper, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := nativeHelperCommand(python, helper)
+	command.Args = append(command.Args, dir)
+	data, err := json.Marshal(map[string]string{"profile": dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.Stdin = strings.NewReader(string(data) + "\n")
+	output, err := command.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "ok" {
+		t.Fatal("Python did not preserve the UTF-8 profile path")
+	}
+}
 
 func TestRejectUnverifiedLibrary(t *testing.T) {
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
