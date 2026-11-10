@@ -598,6 +598,7 @@ function openLogin(mode) {
   $('appleID').value = mode === 'reconnect' ? (current?.login_account || '') : '';
   $('appleID').readOnly = mode === 'reconnect' && !!$('appleID').value;
   $('password').value = '';
+  $('rememberPassword').checked = mode === 'reconnect' && !!current?.status?.password_remembered;
   $('twofactor').value = 'trusted-device';
   $('loginDialog').querySelector('h2').textContent = mode === 'add' ? '添加 Apple 账户' : '重新连接当前账号';
   $('loginDialog').showModal();
@@ -1249,7 +1250,7 @@ $('loginForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (busy) return;
   busy = true;
-  const creds = { apple_id: $('appleID').value.trim(), password: $('password').value, twofactor: $('twofactor').value };
+  const creds = { apple_id: $('appleID').value.trim(), password: $('password').value, twofactor: $('twofactor').value, remember_password: $('rememberPassword').checked };
   $('password').value = '';
   try {
     if (loginMode === 'reconnect' && loginAccount !== selectedAccount) throw new Error('当前账号已切换，请重新打开连接窗口');

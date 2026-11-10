@@ -17,6 +17,14 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true}={}, c
     if(url.hostname!=='dashboard.test')return route.abort();
     let result;
     if(url.pathname==='/api/view')result=view;
+    else if(url.pathname==='/api/accounts/add'){
+      const submitted=route.request().postDataJSON();
+      assert.equal(submitted.apple_id,'owner@example.test');
+      assert.equal(submitted.password,'synthetic-ui-password');
+      assert.equal(await page.locator('#password').inputValue(),'');
+      calls.push(submitted.remember_password?'login-remember':'login-once');
+      result={ok:true,message:'fixture login accepted'};
+    }
     else if(url.pathname==='/api/action'){
       const action=route.request().postDataJSON().action;calls.push(action);
       if(action==='gift-prepare')result={ok:true,message:'兑换会话已核验',gift_card:{ready:true,state:'prepared',preparation_id:'fixture-preparation'}};
@@ -91,6 +99,20 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true}={}, c
       await p.reload();await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
       assert.equal(await p.locator('#giftCode').inputValue(),'');assert(await p.locator('#giftCode').isDisabled());
     });
-    console.log('PASS: payment recheck, existing subscription, failed preparation, cancel and verified purchase (offline)');
+    for(const remember of [false,true]){
+      await scenario(browser,{},async(p,c)=>{
+        await p.evaluate(()=>openLogin('add'));
+        assert.equal(await p.locator('#rememberPassword').isChecked(),false);
+        assert((await p.locator('#rememberPassword').boundingBox()).width<32);
+        await p.locator('#appleID').fill('owner@example.test');
+        await p.locator('#password').fill('synthetic-ui-password');
+        await p.locator('#rememberPassword').setChecked(remember);
+        await p.locator('#loginForm button[type=submit]').click();
+        await p.waitForFunction(()=>!document.getElementById('loginDialog').open);
+        assert.deepEqual(c,[remember?'login-remember':'login-once']);
+        assert.equal(await p.evaluate(()=>JSON.stringify(localStorage).includes('synthetic-ui-password')),false);
+      });
+    }
+    console.log('PASS: payment/gift flows and encrypted-password opt-in (offline)');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

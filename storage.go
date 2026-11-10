@@ -90,7 +90,12 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 		return nil, errors.New("appleservices: complete iCloud login before Store authentication")
 	}
 	if l.storeCommerce.MatchesAccount(l.client.DSID) {
-		return &icloud.StoreAuthenticationInfo{Ready: true}, nil
+		if _, err := l.storeCommerce.ReadSkillSubscription(ctx); err == nil {
+			return &icloud.StoreAuthenticationInfo{Ready: true}, nil
+		} else if l.storeCommerce.MatchesAccount(l.client.DSID) {
+			// A network/service failure must not trigger a password login.
+			return nil, err
+		}
 	}
 	if restored, err := l.RestoreStorePurchaseSession(ctx); err != nil {
 		return nil, err

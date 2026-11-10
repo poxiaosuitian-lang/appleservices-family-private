@@ -46,7 +46,7 @@ func TestStoreSessionDPAPIAccountBindingAndLogout(t *testing.T) {
 	}
 }
 
-func TestStoreSessionRejectsExpiredAndTamperedData(t *testing.T) {
+func TestStoreSessionUsesAppleValidationInsteadOfLocalAgeLimit(t *testing.T) {
 	store := fileStore{dir: t.TempDir()}
 	plain, _ := json.Marshal(protectedStoreSession{1, "owner@example.test", "123", time.Now().Add(-25 * time.Hour), []byte("test")})
 	encrypted, err := protectStoreData(plain, storeEntropy("owner@example.test", "123"), false)
@@ -56,8 +56,8 @@ func TestStoreSessionRejectsExpiredAndTamperedData(t *testing.T) {
 	if err := writeJSONFile(filepath.Join(store.dir, "store-session.dpapi"), encrypted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.LoadStoreSession("owner@example.test", "123"); err == nil {
-		t.Fatal("expired checkpoint accepted")
+	if state, err := store.LoadStoreSession("owner@example.test", "123"); err != nil || string(state) != "test" {
+		t.Fatal("local age limit prevented Apple from validating the saved session")
 	}
 	encrypted[len(encrypted)-1] ^= 1
 	if _, err := protectStoreData(encrypted, storeEntropy("owner@example.test", "123"), true); err == nil {

@@ -31,6 +31,34 @@ func verifiedTestSession() *Session {
 	}}
 }
 
+type passwordResumeStore struct {
+	memoryStore
+	password string
+	loadErr  error
+	loads    int
+}
+
+func (s *passwordResumeStore) LoadLoginPassword(string) (string, error) {
+	s.loads++
+	return s.password, s.loadErr
+}
+
+func TestResumeUsesProtectedPasswordOnlyAfterAccountBinding(t *testing.T) {
+	store := &passwordResumeStore{memoryStore: memoryStore{session: verifiedTestSession()}, password: "synthetic-remembered-password"}
+	login, err := ResumeVerifiedLogin("owner@example.test", store, testOptions(&fakeBackend{}, testDelegate)...)
+	if err != nil || login.creds.Password != store.password || store.loads != 1 {
+		t.Fatal("bound encrypted credential was not available for reconnect")
+	}
+	if _, err := ResumeVerifiedLogin("other@example.test", store, testOptions(&fakeBackend{}, testDelegate)...); err == nil || store.loads != 1 {
+		t.Fatal("cross-account password was read")
+	}
+	store.loadErr = errors.New("cannot decrypt")
+	login, err = ResumeVerifiedLogin("owner@example.test", store, testOptions(&fakeBackend{}, testDelegate)...)
+	if err != nil || login.creds.Password != "" {
+		t.Fatal("missing credential should retain token-only resume")
+	}
+}
+
 func TestLegacyVerifiedResumeRequiresAppleDelegateAcceptance(t *testing.T) {
 	for _, refused := range []bool{false, true} {
 		store := &checkpointStore{memoryStore: memoryStore{session: verifiedTestSession()}}

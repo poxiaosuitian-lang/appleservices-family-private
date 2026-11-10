@@ -105,6 +105,7 @@ func renewSessionMode(begin func() (maintainedLogin, error), accountID string, r
 }
 
 type runtimeStatus struct {
+	PasswordRemembered      bool      `json:"password_remembered"`
 	PID                     int       `json:"pid"`
 	Running                 bool      `json:"running"`
 	PushConnected           bool      `json:"push_connected"`

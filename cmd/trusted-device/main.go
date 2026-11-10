@@ -63,6 +63,8 @@ func run() (runErr error) {
 	controlAPI := flag.Bool("control-api", false, "enable authenticated local dashboard control")
 	guiAuth := flag.Bool("gui-auth", false, "complete initial SMS verification through the dashboard")
 	resumeSession := flag.Bool("resume-session", false, "restore the account-bound GSA and accepted iCloud sessions without a password")
+	rememberPassword := flag.Bool("remember-password", false, "save a verified password with Windows user encryption for automatic reconnect")
+	forgetPassword := flag.Bool("forget-password", false, "remove the saved password after this successful login")
 	flag.Parse()
 	if *background {
 		*controlAPI = true
@@ -165,6 +167,12 @@ func run() (runErr error) {
 	}
 	os.Unsetenv("APPLESERVICES_APPLEID")
 	os.Unsetenv("APPLESERVICES_PASSWORD")
+	storedPassword := savedLoginPassword(store, appleID)
+	if *resumeSession && password == "" {
+		password = storedPassword
+	}
+	passwordRemembered := storedPassword != ""
+	storedPassword = ""
 	status := runtimeStatus{PID: os.Getpid(), Running: true, State: "starting"}
 	if err := status.save(*dir); err != nil {
 		return err
@@ -286,8 +294,22 @@ func run() (runErr error) {
 		return err
 	}
 	var login *appleservices.Login
+	var reconnect reconnectGate
 	if *resumeSession {
 		login, err = resumeSavedLogin(appleID, store, options...)
+		if err == nil {
+			_, err = login.Client()
+			if err == nil {
+				_, err = login.AccountDevices()
+			}
+			if err == nil {
+				_, err = login.StorageInfo(ctx)
+			}
+		}
+		if reconnect.allow(err, password) {
+			login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+			*resumeSession = false
+		}
 	} else {
 		login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 	}
@@ -469,8 +491,32 @@ func run() (runErr error) {
 	if err := active.SaveSession(); err != nil {
 		return err
 	}
+	if *forgetPassword {
+		if err := store.ForgetLoginPassword(); err != nil {
+			return errors.New("could not remove protected login credential")
+		}
+		passwordRemembered = false
+	} else if *rememberPassword || passwordRemembered {
+		protected, ok := any(store).(loginPasswordStore)
+		if !ok || protected.SaveLoginPassword(appleID, password) != nil {
+			return errors.New("could not save Windows protected login credential")
+		}
+		passwordRemembered = true
+	}
+	status.PasswordRemembered = passwordRemembered
+	reconnect.blocked = false
 	if *resumeSession {
-		if _, err := login.RestoreStorePurchaseSession(ctx); err != nil {
+		var storeErr error
+		if passwordRemembered {
+			_, storeErr = login.CheckSkillStoragePurchaseSession(ctx, func() (string, error) {
+				codeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				defer cancel()
+				return generateCode(codeCtx)
+			})
+		} else {
+			_, storeErr = login.RestoreStorePurchaseSession(ctx)
+		}
+		if storeErr != nil {
 			fmt.Fprintln(os.Stderr, "Saved Store session needs a new check or reconnect; iCloud login is still available.")
 		}
 	}
@@ -548,8 +594,12 @@ func run() (runErr error) {
 	refresh := time.NewTicker(*refreshEvery)
 	defer refresh.Stop()
 	beginRenewal := func() (maintainedLogin, error) {
-		if *resumeSession {
-			return resumeSavedLogin(appleID, store, options...)
+		if *resumeSession || passwordRemembered {
+			saved, err := resumeSavedLogin(appleID, store, options...)
+			if err == nil {
+				_, err = saved.StorageInfo(ctx)
+			}
+			return saved, err
 		}
 		renewed, err := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 		if err == nil {
@@ -561,10 +611,16 @@ func run() (runErr error) {
 		if status.VerificationRequired {
 			return control.Result{Stage: "verification-required", Message: "需要完成账号验证或重新连接，后台不会自动重复申请验证码"}
 		}
-		renewed, devices, err := renewSessionMode(beginRenewal, accountID, registration, !*resumeSession)
+		renewed, devices, err := renewWithReconnect(beginRenewal, func() (maintainedLogin, error) {
+			candidate, loginErr := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+			if loginErr == nil {
+				verifyLocal(candidate)
+			}
+			return candidate, loginErr
+		}, accountID, registration, !*resumeSession && !passwordRemembered, password, &reconnect)
 		if err != nil {
 			status.State = "refresh_failed"
-			if errors.Is(err, errVerificationRequired) {
+			if errors.Is(err, errVerificationRequired) || reconnect.blocked {
 				status.State, status.VerificationRequired = "verification_required", true
 			}
 			status.save(*dir)
@@ -576,6 +632,7 @@ func run() (runErr error) {
 			}
 		}
 		active = renewed
+		reconnect.blocked = false
 		if panel != nil {
 			ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
 			panel.SetStoreSessionReady(ok && ready.StorePurchaseSessionReady())

@@ -2,7 +2,7 @@
 
 实现不启动或控制 Apple Music，不读取官方客户端的 Cookie、缓存或钥匙串。使用项目自身的 Store 登录会话和内存 Cookie jar。
 
-Windows 可将已认证的 Store 会话用当前 Windows 用户的 DPAPI 加密保存，重启后先向 Apple 做只读核验，再继续准备兑换页；详见[自动恢复登录](automatic-login.md)。密码、验证码、礼品卡代码及兑换确认 ID 不保存。
+Windows 可将已认证的 Store 会话用当前 Windows 用户的 DPAPI 加密保存，重启后先向 Apple 做只读核验，再继续准备兑换页；详见[自动恢复登录](automatic-login.md)。验证码、礼品卡代码及兑换确认 ID 不保存。密码仅在用户选择“加密记住密码”时单独加密保存，用于会话失效后重新认证。
 
 ## 已验证与待验证
 

@@ -94,9 +94,64 @@ func (s fileStore) LoadStoreSession(appleID, dsid string) ([]byte, error) {
 	}
 	defer clear(plain)
 	var session protectedStoreSession
-	if json.Unmarshal(plain, &session) != nil || session.Version != 1 || !strings.EqualFold(session.AppleID, appleID) || session.DSID != dsid ||
-		time.Since(session.SavedAt) < 0 || time.Since(session.SavedAt) > 24*time.Hour {
-		return nil, errors.New("saved Store session expired or binding changed")
+	if json.Unmarshal(plain, &session) != nil || session.Version != 1 || !strings.EqualFold(session.AppleID, appleID) || session.DSID != dsid {
+		return nil, errors.New("saved Store session binding changed")
 	}
 	return session.State, nil
+}
+
+type protectedLoginPassword struct {
+	Version  int
+	AppleID  string
+	ADSID    string
+	Password string
+}
+
+func passwordEntropy(appleID, adsid string) []byte {
+	h := sha256.Sum256([]byte("appleservices-login-password-v1\x00" + strings.ToLower(strings.TrimSpace(appleID)) + "\x00" + adsid))
+	return h[:]
+}
+
+// SaveLoginPassword is called only after successful account authentication and
+// explicit opt-in. DPAPI binds ciphertext to this Windows user and account.
+func (s fileStore) SaveLoginPassword(appleID, password string) error {
+	saved, err := s.LoadSession()
+	if err != nil || saved == nil || !strings.EqualFold(saved.AppleID, appleID) || saved.DSID == "" || password == "" || len(password) > 4096 {
+		return errors.New("login credential binding is incomplete")
+	}
+	plain, err := json.Marshal(protectedLoginPassword{1, saved.AppleID, saved.DSID, password})
+	if err != nil {
+		return err
+	}
+	defer clear(plain)
+	encrypted, err := protectStoreData(plain, passwordEntropy(appleID, saved.DSID), false)
+	if err != nil {
+		return err
+	}
+	return writeJSONFile(filepath.Join(s.dir, "login-password.dpapi"), encrypted)
+}
+
+func (s fileStore) LoadLoginPassword(appleID string) (string, error) {
+	saved, err := s.LoadSession()
+	if err != nil || saved == nil || !strings.EqualFold(saved.AppleID, appleID) || saved.DSID == "" {
+		return "", errors.New("login credential binding is incomplete")
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, "login-password.dpapi"))
+	if err != nil {
+		return "", err
+	}
+	var encrypted []byte
+	if len(data) > 32<<10 || json.Unmarshal(data, &encrypted) != nil {
+		return "", errors.New("invalid protected login credential")
+	}
+	plain, err := protectStoreData(encrypted, passwordEntropy(appleID, saved.DSID), true)
+	if err != nil {
+		return "", err
+	}
+	defer clear(plain)
+	var secret protectedLoginPassword
+	if json.Unmarshal(plain, &secret) != nil || secret.Version != 1 || !strings.EqualFold(secret.AppleID, appleID) || secret.ADSID != saved.DSID || secret.Password == "" || len(secret.Password) > 4096 {
+		return "", errors.New("protected login credential binding changed")
+	}
+	return secret.Password, nil
 }

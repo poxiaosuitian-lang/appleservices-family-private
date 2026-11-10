@@ -54,6 +54,7 @@ type Server struct {
 	provisionMacPush func(context.Context, string) error
 }
 type Status struct {
+	PasswordRemembered   bool      `json:"password_remembered"`
 	PID                  int       `json:"pid"`
 	Running              bool      `json:"running"`
 	PushConnected        bool      `json:"push_connected"`
@@ -101,9 +102,10 @@ type view struct {
 	ActivationReady              bool                    `json:"activation_ready"`
 }
 type credentials struct {
-	AppleID   string `json:"apple_id"`
-	Password  string `json:"password"`
-	TwoFactor string `json:"twofactor,omitempty"`
+	RememberPassword *bool  `json:"remember_password,omitempty"`
+	AppleID          string `json:"apple_id"`
+	Password         string `json:"password"`
+	TwoFactor        string `json:"twofactor,omitempty"`
 }
 
 func New(config Config) (*Server, error) {
@@ -920,6 +922,13 @@ func (s *Server) startInMode(ctx context.Context, dir string, creds credentials,
 	defer diagnostic.Close()
 	command := exec.Command(s.config.Worker, "-native-adi", "-background", "-control-api", "-gui-auth", "-dir", dir, "-adi-dll", s.config.Library, "-python", s.config.Python)
 	command.Args = append(command.Args, "-twofactor", creds.TwoFactor)
+	if creds.RememberPassword != nil {
+		if *creds.RememberPassword {
+			command.Args = append(command.Args, "-remember-password")
+		} else {
+			command.Args = append(command.Args, "-forget-password")
+		}
+	}
 	if resume {
 		command.Args = append(command.Args, "-resume-session")
 	}

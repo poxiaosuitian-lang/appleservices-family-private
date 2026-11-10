@@ -181,6 +181,12 @@ func ResumeVerifiedLogin(appleID string, store Store, opts ...Option) (*Login, e
 	}
 	l.result = &gsa.LoginResult{SessionPayload: payload}
 	l.adsid, l.needsTwoFactor, l.gsaCheckpointed = saved.DSID, false, true
+	if protected, ok := store.(interface{ LoadLoginPassword(string) (string, error) }); ok {
+		// Only explicit local opt-in creates this OS-protected credential.
+		if password, err := protected.LoadLoginPassword(l.creds.AppleID); err == nil {
+			l.creds.Password = password
+		}
+	}
 	return l, nil
 }
 

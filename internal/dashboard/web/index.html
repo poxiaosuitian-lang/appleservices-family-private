@@ -641,11 +641,12 @@
     </div>
     <div class="eyebrow">恢复或注册工作空间</div>
     <h2>连接 Apple 账户</h2>
-    <p>沿用或隔离初始化这台电脑专属的设备身份。密码仅用于本次安全认证，不落盘明文存储。</p>
+    <p>沿用或隔离初始化这台电脑专属的设备身份。可选择在此电脑加密记住密码，用于会话失效后自动重连。</p>
     <label for="appleID">Apple 账户邮箱</label>
     <input id="appleID" name="apple_id" type="email" autocomplete="username" placeholder="name@example.com" required>
     <label for="password">账户密码</label>
     <input id="password" name="password" type="password" autocomplete="off" placeholder="输入 Apple 账户密码" required>
+    <label class="remember-login"><input id="rememberPassword" type="checkbox"> 在此电脑加密记住密码，用于会话失效后自动重连</label>
     <label for="twofactor">首次双重验证方式</label>
     <select id="twofactor" name="twofactor">
       <option value="trusted-device">受信任设备验证码（推荐）</option>

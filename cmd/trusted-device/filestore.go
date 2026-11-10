@@ -57,6 +57,9 @@ func (s fileStore) LoadSession() (*appleservices.Session, error) {
 
 func (s fileStore) SaveSession(sess *appleservices.Session) error {
 	if sess == nil {
+		if err := s.ForgetLoginPassword(); err != nil {
+			return err
+		}
 		if err := os.Remove(filepath.Join(s.dir, "store-session.dpapi")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -72,6 +75,14 @@ func (s fileStore) SaveSession(sess *appleservices.Session) error {
 		return err
 	}
 	return writeJSONFile(s.sessionPath(), sess)
+}
+
+func (s fileStore) ForgetLoginPassword() error {
+	err := os.Remove(filepath.Join(s.dir, "login-password.dpapi"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func (s fileStore) SaveAcceptedICloud(appleID string, accepted appleservices.RestoredICloudSession) error {
