@@ -8,9 +8,49 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestPrimaryMailCandidateNamesRespectAppleLimit(t *testing.T) {
+	valid := regexp.MustCompile(`^[a-z][a-z0-9]{2,19}@icloud\.com$`)
+	for _, id := range []string{"abcdefghijklmnopqrst@example.test", "abcdefghijklmnopqrstuvwxyz@example.test", "a@example.test", "123@example.test", "用户@example.test", "alice@example.test"} {
+		seen := map[string]bool{}
+		for _, email := range primaryMailCandidates(id) {
+			if !valid.MatchString(email) || seen[email] {
+				t.Fatalf("invalid or duplicate candidate for %q: %q", id, email)
+			}
+			seen[email] = true
+		}
+		if len(seen) != 4 {
+			t.Fatal("missing fallback candidates")
+		}
+	}
+}
+
+func TestPrimaryMailServiceFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body, want string
+		status                 int
+		auth                   bool
+	}{
+		{"activation-rejected", "/mailacct/v1/web/activateEmail", `{"errorCode":"-1234","errorMessage":"private-secret"}`, "邮箱创建（HTTP 403，代码 -1234）", 403, false},
+		{"session-expired", "/mailacct/v1/web/activateEmail", `{"errorCode":"-9008"}`, "邮箱创建未完成", 403, true},
+		{"session-unauthorized", "/setup/ws/1/validate", `{}`, "邮箱状态查询未完成", 401, true},
+		{"too-long", "/mailacct/v1/web/emailAvailability", `{"errorCode":"MAX_LENGTH_VIOLATION"}`, "3–20", 400, false},
+		{"unknown-code", "/mailacct/v1/web/activateEmail", `{"errorCode":"private-secret"}`, "邮箱创建（HTTP 200）", 200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := mailTestClient(t, func(*http.Request) (int, string, error) { return tc.status, tc.body, nil })
+			var out map[string]any
+			err := c.request(context.Background(), "https://p01-mailgateway.icloud.com"+tc.path, map[string]any{}, &out)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-secret") || errors.Is(err, ErrPrimaryMailAuthentication) != tc.auth {
+				t.Fatalf("wrong classification or unsafe diagnostic: %v", err)
+			}
+		})
+	}
+}
 
 type mailTransport func(*http.Request) (*http.Response, error)
 

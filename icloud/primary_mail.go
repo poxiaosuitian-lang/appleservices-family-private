@@ -179,7 +179,44 @@ func primaryMailCandidates(appleID string) []string {
 		name = name[:20]
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(id)))
-	return []string{name + "@icloud.com", name + digest[:4] + "@icloud.com", name + digest[:6] + "@icloud.com", name + digest[:8] + "@icloud.com"}
+	candidates := []string{name + "@icloud.com"}
+	for _, size := range []int{4, 6, 8} {
+		prefix := name
+		if len(prefix) > 20-size {
+			prefix = prefix[:20-size]
+		}
+		candidates = append(candidates, prefix+digest[:size]+"@icloud.com")
+	}
+	return candidates
+}
+
+// Only known public validation codes and short numeric codes may be shown.
+// Unknown response fields can contain account data and must not reach the UI.
+func primaryMailServiceError(path string, status int, code string) error {
+	stage := "邮箱服务请求"
+	switch path {
+	case "/setup/ws/1/validate":
+		stage = "邮箱状态查询"
+	case "/mailacct/v1/web/emailAvailability":
+		stage = "邮箱名称检查"
+	case "/mailacct/v1/web/activateEmail":
+		stage = "邮箱创建"
+	}
+	if status == 401 || status == 421 || code == "-9008" {
+		return fmt.Errorf("%s未完成（HTTP %d）：%w", stage, status, ErrPrimaryMailAuthentication)
+	}
+	detail := ""
+	switch code {
+	case "MIN_LENGTH_VIOLATION", "MAX_LENGTH_VIOLATION":
+		detail = "，邮箱名称须为 3–20 个字符，代码 " + code
+	case "ALLOWED_CHARACTER_VIOLATION", "START_WITH_LETTER_VIOLATION", "END_WITH_LETTER_OR_NUMBER_VIOLATION", "FORMAT_VIOLATION", "CONSECUTIVE_DOTS_VIOLATION", "CONSECUTIVE_UNDERSCORE_VIOLATION":
+		detail = "，邮箱名称不符合要求，代码 " + code
+	default:
+		if regexp.MustCompile(`^-?[0-9]{1,8}$`).MatchString(code) {
+			detail = "，代码 " + code
+		}
+	}
+	return fmt.Errorf("Apple 未接受%s（HTTP %d%s）", stage, status, detail)
 }
 
 // Errors intentionally exclude raw responses, URLs, cookies and credentials.
@@ -211,7 +248,7 @@ func (c *PrimaryMailClient) request(ctx context.Context, endpoint string, body a
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 || resp.StatusCode == 421 {
-		return ErrPrimaryMailAuthentication
+		return primaryMailServiceError(u.Path, resp.StatusCode, "")
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
 	if err != nil || len(data) > 2<<20 {
@@ -221,11 +258,8 @@ func (c *PrimaryMailClient) request(ctx context.Context, endpoint string, body a
 		Code string `json:"errorCode"`
 	}
 	_ = json.Unmarshal(data, &failure)
-	if failure.Code == "-9008" || resp.StatusCode == 403 {
-		return ErrPrimaryMailAuthentication
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || failure.Code != "" {
-		return fmt.Errorf("Apple 未接受邮箱请求（HTTP %d）", resp.StatusCode)
+		return primaryMailServiceError(u.Path, resp.StatusCode, failure.Code)
 	}
 	if json.Unmarshal(data, out) != nil {
 		return errors.New("Apple 邮箱响应格式不完整")
