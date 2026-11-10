@@ -83,14 +83,22 @@ func (l *Login) CheckStoragePurchaseSession(ctx context.Context, code string) (*
 }
 
 // CheckSkillStoragePurchaseSession uses the native framework helper, including
-// Apple's Store-specific machine provisioning. Credentials and proof state stay
-// in memory. The provider is called only after Apple requests a code.
+// Apple's Store-specific machine provisioning. Passwords and codes stay in
+// memory; an opt-in OS-protected store can retain the resulting session tokens.
 func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvider func() (string, error)) (*icloud.StoreAuthenticationInfo, error) {
 	if l.needsTwoFactor || l.client == nil {
 		return nil, errors.New("appleservices: complete iCloud login before Store authentication")
 	}
 	if l.storeCommerce.MatchesAccount(l.client.DSID) {
 		return &icloud.StoreAuthenticationInfo{Ready: true}, nil
+	}
+	if restored, err := l.RestoreStorePurchaseSession(ctx); err != nil {
+		return nil, err
+	} else if restored {
+		return &icloud.StoreAuthenticationInfo{Ready: true}, nil
+	}
+	if l.creds.Password == "" {
+		return nil, &icloud.StorageError{Stage: "purchase-store-reconnect-required"}
 	}
 	session, err := icloud.AuthenticateFrameworkStore(ctx, l.creds.AppleID, l.creds.Password, l.client.DSID, l.storeCommerce, codeProvider)
 	if err != nil {
@@ -100,6 +108,10 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 		return nil, errors.New("appleservices: Store account binding failed")
 	}
 	l.storeCommerce = session
+	if err := l.saveStorePurchaseSession(); err != nil {
+		l.storeCommerce = nil
+		return nil, &icloud.StorageError{Stage: "purchase-store-checkpoint-save"}
+	}
 	return &icloud.StoreAuthenticationInfo{Ready: true}, nil
 }
 

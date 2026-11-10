@@ -19,6 +19,29 @@ func helperResultFixture() *storeAuthMessage {
 	return &storeAuthMessage{Version: 1, Type: "result", OK: true, Email: "owner@example.test", DSID: "1234", Token: "synthetic-token", Storefront: "143441-1,29", GUID: "001122334455", State: []byte(`{"Identifier":"0123456789abcdef"}`)}
 }
 
+func TestPrivateStoreCheckpointExcludesPasswordCodeAndGiftState(t *testing.T) {
+	r := helperResultFixture()
+	r.Password, r.Code = "must-not-persist-password", "123456"
+	s, err := importFrameworkSession(r, r.Email, r.DSID, r.GUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := s.PrivateCheckpoint(r.Email, r.DSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded storeAuthMessage
+	if json.Unmarshal(data, &decoded) != nil || decoded.Password != "" || decoded.Code != "" || decoded.Token != r.Token {
+		t.Fatal("checkpoint included transient secrets or lost session token")
+	}
+	if _, err := s.PrivateCheckpoint("other@example.test", r.DSID); err == nil {
+		t.Fatal("wrong-account checkpoint exported")
+	}
+	if _, err := s.PrivateCheckpoint(r.Email, "999"); err == nil {
+		t.Fatal("wrong-DSID checkpoint exported")
+	}
+}
+
 func TestFrameworkSessionBinding(t *testing.T) {
 	for _, test := range []struct {
 		name   string

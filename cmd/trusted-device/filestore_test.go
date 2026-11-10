@@ -41,3 +41,38 @@ func TestLoadAcceptedICloudRequiresSameSavedAccount(t *testing.T) {
 		t.Fatal("cross-account accepted checkpoint was restored")
 	}
 }
+
+func TestAcceptedSessionSavedForRestartAndRemovedOnLogout(t *testing.T) {
+	store := fileStore{dir: t.TempDir()}
+	saved := &appleservices.Session{AppleID: "owner@example.test", DSID: "gsa"}
+	if err := store.SaveSession(saved); err != nil {
+		t.Fatal(err)
+	}
+	accepted := appleservices.RestoredICloudSession{ADSID: "gsa", DSID: "123", MMEAuthToken: "mme", ServiceData: map[string]any{}}
+	if err := store.SaveAcceptedICloud("other@example.test", accepted); err == nil {
+		t.Fatal("cross-account write accepted")
+	}
+	if err := store.SaveAcceptedICloud(saved.AppleID, accepted); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.LoadAcceptedICloud()
+	if err != nil || loaded.ADSID != accepted.ADSID || loaded.MMEAuthToken != accepted.MMEAuthToken {
+		t.Fatal("checkpoint not restored")
+	}
+	if err := appleservices.Logout(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.acceptedPath()); !os.IsNotExist(err) {
+		t.Fatal("logout retained delegate tokens")
+	}
+}
+
+func TestResumeDoesNotMigrateMalformedCheckpoint(t *testing.T) {
+	store := fileStore{dir: t.TempDir()}
+	if err := os.WriteFile(store.acceptedPath(), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resumeSavedLogin("owner@example.test", store); err == nil {
+		t.Fatal("invalid checkpoint was migrated")
+	}
+}

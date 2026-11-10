@@ -854,7 +854,7 @@ func (s *Server) startIn(ctx context.Context, dir string, creds credentials, acc
 }
 
 func (s *Server) startSavedAccount(ctx context.Context, account *Account) control.Result {
-	if account == nil || !verifiedGSACheckpointReady(account.Dir, account.AppleID) || !acceptedCheckpointReady(account.Dir, account.AppleID) {
+	if account == nil || !savedLoginReady(account.Dir, account.AppleID) {
 		return control.Result{Message: "已保存登录会话不可用，请输入当前密码重新连接"}
 	}
 	return s.startInMode(ctx, account.Dir, credentials{AppleID: account.AppleID}, account, true)
@@ -970,7 +970,7 @@ func lastProcessError(path string) string {
 			return "所选目录缺少有效设备身份，请选择已有账号，或通过添加账号建立身份"
 		case strings.Contains(line, "APPLESERVICES_APPLEID and APPLESERVICES_PASSWORD are required"):
 			return "请重新输入当前账号密码"
-		case strings.Contains(line, "saved login session cannot be restored"):
+		case strings.Contains(line, "saved login session cannot be restored"), strings.Contains(line, "saved device session was not accepted"), strings.Contains(line, "saved iCloud session was not accepted"), strings.Contains(line, "saved login session is incomplete"):
 			return "Apple 已保存会话失效，请输入当前账号密码重新连接"
 		case strings.Contains(line, "ec=-22406") && strings.Contains(line, "correct password"):
 			return "Apple 拒绝了当前密码，请确认使用的是这个账号的最新密码，并关闭密码管理器的旧自动填充"
@@ -1032,7 +1032,7 @@ func (s *Server) Bootstrap(ctx context.Context, appleID, password string) {
 		accounts := append([]*Account(nil), s.accounts...)
 		s.accountsMu.Unlock()
 		for _, account := range accounts {
-			if ctx.Err() != nil || s.accountStatus(account).Running || !acceptedCheckpointReady(account.Dir, account.AppleID) || !verifiedGSACheckpointReady(account.Dir, account.AppleID) {
+			if ctx.Err() != nil || s.accountStatus(account).Running || !savedLoginReady(account.Dir, account.AppleID) {
 				continue
 			}
 			result := s.startSavedAccount(ctx, account)

@@ -252,10 +252,42 @@ func importFrameworkSession(result *storeAuthMessage, email, expectedDSID, guid 
 		}
 		jar.SetCookies(u, event.Cookies)
 	}
+	// Explicit allowlist: never retain a password, OTP, pending redemption or
+	// arbitrary helper fields in the restart checkpoint.
+	checkpoint, err := json.Marshal(storeAuthMessage{Version: 1, Type: "result", OK: true,
+		Email: result.Email, DSID: result.DSID, Token: result.Token, Storefront: result.Storefront,
+		Pod: result.Pod, GUID: result.GUID, Cookies: result.Cookies, State: result.State})
+	if err != nil {
+		return nil, bad
+	}
 	return &StoreCommerceSession{
 		identity:          &storeSession{DSID: result.DSID, PasswordToken: result.Token, StoreFront: result.Storefront, Pod: result.Pod, GUID: guid},
 		client:            &http.Client{Jar: jar, Transport: skillMatchedHTTPTransport(), Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		commerceUserAgent: frameworkStoreAgent,
 		frameworkState:    append([]byte(nil), result.State...), frameworkDSID: result.DSID, frameworkEmail: result.Email, frameworkGUID: guid,
+		frameworkCheckpoint: checkpoint,
 	}, nil
+}
+
+// PrivateCheckpoint contains authentication tokens. Callers must encrypt it
+// with the operating system; it is never a UI/API response or a log value.
+func (s *StoreCommerceSession) PrivateCheckpoint(appleID, dsid string) ([]byte, error) {
+	if !s.MatchesAccount(dsid) || !strings.EqualFold(s.frameworkEmail, appleID) || len(s.frameworkCheckpoint) == 0 {
+		return nil, &StorageError{Stage: "purchase-store-checkpoint-binding"}
+	}
+	return append([]byte(nil), s.frameworkCheckpoint...), nil
+}
+
+// RestoreFrameworkStore binds saved tokens to both the account and physical
+// Store identity. Callers must perform a read-only server check before use.
+func RestoreFrameworkStore(data []byte, appleID, dsid string) (*StoreCommerceSession, error) {
+	guid, _, err := storeHardwareIdentity()
+	if err != nil {
+		return nil, &StorageError{Stage: "purchase-store-physical-hardware"}
+	}
+	var result storeAuthMessage
+	if len(data) == 0 || len(data) > maxHelperMessage || json.Unmarshal(data, &result) != nil || result.Password != "" || result.Code != "" {
+		return nil, &StorageError{Stage: "purchase-store-checkpoint-invalid"}
+	}
+	return importFrameworkSession(&result, appleID, dsid, guid)
 }

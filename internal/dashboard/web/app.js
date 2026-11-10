@@ -141,6 +141,8 @@ function renderPlans(info,{checkedAt='',stale=false}={}){planAccount=selectedAcc
 function purchaseOutcomeMessage(result){
   if(!result.ok){
     if(result.stage==='purchase-store-session')return '购买会话已失效或随登录续期重置，请重新验证购买会话；未提交购买。';
+    if(result.stage==='purchase-store-reconnect-required')return 'Apple 商店登录已过期，请重新连接此账号一次。iCloud 登录仍保留，未提交购买或兑换。';
+    if(result.stage==='purchase-store-checkpoint-save')return '商店登录已通过，但本机加密保存失败，请检查状态目录权限后重试。';
     if(['payment-confirmation','billing-confirmation'].includes(result.apple_hint))return 'Apple 返回付款或账单相关提示，请检查该账号的可用付款方式或 Apple 账户余额。可在官方客户端兑换同地区礼品卡，到账后点击“付款准备完成，重新检查”；此提示不能单独确定错误原因。';
     if(result.stage==='purchase-skill-buy')return 'Apple 未接受此次购买。HTTP 200 仅表示收到响应，不代表已开通；具体原因请查看下方 Apple 错误码。若尚未添加付款方式，请先完成付款准备。';
     return result.message||'购买结果尚未确认，请先核对订阅和容量，不要重复提交。';
@@ -209,7 +211,7 @@ async function action(name,extra={},options={}){
       throw new Error((result.message||'操作未完成')+detail);
     }
     if(result.activation){activationInfo=result.activation;activationAccount=selectedAccount;if(current&&result.activation.completed){current.icloud_activated=true;current.activation_ready=false;}renderActivation(current);}
-    if(result.store_authentication?.ready&&actionAccount===selectedAccount&&actionPID===(current?.status?.pid||0)&&actionRefresh===(current?.status?.last_refresh_at||'')){storeAuthReady=true;storeAuthAccount=selectedAccount;$('storeAuthSummary').textContent='购买会话认证通过 · 当前后台会话可用 · 临时会话不会持久化';}
+    if(result.store_authentication?.ready&&actionAccount===selectedAccount&&actionPID===(current?.status?.pid||0)&&actionRefresh===(current?.status?.last_refresh_at||'')){storeAuthReady=true;storeAuthAccount=selectedAccount;$('storeAuthSummary').textContent='购买会话认证通过 · 当前后台会话可用';}
     if(result.storage){const checkedAt=new Date().toISOString();if(current){current.storage=result.storage;current.storage_checked_at=checkedAt;current.storage_stale=false;}renderStorage(result.storage,{checkedAt,stale:false});}
     if(result.storage_plan){const checkedAt=new Date().toISOString();if(current){current.storage_plan=result.storage_plan;current.storage_plan_checked_at=checkedAt;current.storage_plan_stale=false;}renderPlans(result.storage_plan,{checkedAt,stale:false});}
     if(result.hide_my_email)renderHME(result.hide_my_email);

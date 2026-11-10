@@ -47,6 +47,7 @@ type Login struct {
 	serialNumber    string
 	storeCommerce   *icloud.StoreCommerceSession
 	gsaCheckpointed bool
+	localCodeTried  bool
 }
 
 func prepareLogin(creds Credentials, store Store, requirePassword bool, opts ...Option) (*Login, *Session, error) {
@@ -138,17 +139,34 @@ func BeginLogin(creds Credentials, store Store, opts ...Option) (*Login, error) 
 // handshake and never weakens the binding between the account, GSA ADSID and
 // iCloud delegate ADSID.
 func ResumeLogin(appleID string, store Store, accepted RestoredICloudSession, opts ...Option) (*Login, error) {
+	l, err := ResumeVerifiedLogin(appleID, store, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if l.adsid != accepted.ADSID || accepted.DSID == "" || accepted.MMEAuthToken == "" || accepted.ServiceData == nil {
+		return nil, errors.New("appleservices: saved iCloud session binding is invalid or incomplete")
+	}
+	l.client = &Client{DSID: accepted.DSID, ADSID: accepted.ADSID, MMEAuthToken: accepted.MMEAuthToken,
+		StorageBuyToken: spdToken(l.result.SessionPayload, "com.apple.gs.icloud.storage.buy"), CloudKitToken: accepted.CloudKitToken, serviceData: accepted.ServiceData}
+	return l, nil
+}
+
+// ResumeVerifiedLogin reuses an account-bound, previously verified GSA session.
+// Client must still exchange its PET with Apple before iCloud access is ready.
+// This migrates older installations that saved GSA state but no delegate state;
+// it does not perform a password login, request an OTP or accept service terms.
+func ResumeVerifiedLogin(appleID string, store Store, opts ...Option) (*Login, error) {
 	l, saved, err := prepareLogin(Credentials{AppleID: appleID}, store, false, opts...)
 	if err != nil {
 		return nil, err
 	}
-	if saved == nil || !strings.EqualFold(saved.AppleID, l.creds.AppleID) || saved.DSID == "" || saved.DSID != accepted.ADSID {
+	if saved == nil || !strings.EqualFold(saved.AppleID, l.creds.AppleID) || saved.DSID == "" {
 		return nil, errors.New("appleservices: saved account session binding is invalid")
 	}
 	pet := saved.Tokens["com.apple.gs.idms.pet"]
 	heartbeat := saved.Tokens["com.apple.gs.idms.hb"]
 	accountToken := saved.Tokens["com.apple.gs.appleid.auth"]
-	if pet == "" || heartbeat == "" || accountToken == "" || accepted.DSID == "" || accepted.MMEAuthToken == "" || accepted.ServiceData == nil {
+	if pet == "" || heartbeat == "" || accountToken == "" {
 		return nil, errors.New("appleservices: saved login session is incomplete")
 	}
 	services := make(map[string]any, len(saved.Tokens))
@@ -163,8 +181,6 @@ func ResumeLogin(appleID string, store Store, accepted RestoredICloudSession, op
 	}
 	l.result = &gsa.LoginResult{SessionPayload: payload}
 	l.adsid, l.needsTwoFactor, l.gsaCheckpointed = saved.DSID, false, true
-	l.client = &Client{DSID: accepted.DSID, ADSID: accepted.ADSID, MMEAuthToken: accepted.MMEAuthToken,
-		StorageBuyToken: saved.Tokens["com.apple.gs.icloud.storage.buy"], CloudKitToken: accepted.CloudKitToken, serviceData: accepted.ServiceData}
 	return l, nil
 }
 
@@ -205,10 +221,37 @@ func (l *Login) authenticate() error {
 	l.needsTwoFactor = res.NeedsTwoFactor
 	l.client = nil
 	l.storeCommerce = nil
+	l.gsaCheckpointed = false
 	return nil
 }
 
 func (l *Login) NeedsTwoFactor() bool { return l.needsTwoFactor }
+
+// CompleteLocalTwoFactor makes at most one attempt for an existing account's
+// trusted-device challenge. First-time accounts and SMS challenges stay manual.
+// The provider must use this account directory's native device identity.
+func (l *Login) CompleteLocalTwoFactor(codeProvider func() (string, error)) (bool, error) {
+	if !l.needsTwoFactor || l.localCodeTried || codeProvider == nil || l.result == nil || l.result.TwoFactorMethod != "trustedDeviceSecondaryAuth" {
+		return false, nil
+	}
+	saved, err := l.store.LoadSession()
+	if err != nil || saved == nil || !strings.EqualFold(saved.AppleID, l.creds.AppleID) ||
+		saved.DSID != l.adsid || saved.DeviceIdentityToken == "" || saved.Tokens["com.apple.gs.idms.pet"] == "" {
+		return false, nil
+	}
+	l.localCodeTried = true
+	if err := l.RequestCode(TrustedDevice); err != nil {
+		return true, errors.New("appleservices: local device challenge was not accepted; manual verification required")
+	}
+	code, err := codeProvider()
+	if err != nil {
+		return true, errors.New("appleservices: local device code unavailable; manual verification required")
+	}
+	if err := l.SubmitCode(TrustedDevice, code); err != nil {
+		return true, errors.New("appleservices: local device verification did not complete; manual verification required")
+	}
+	return true, nil
+}
 
 // BeginAccountValidation starts a fresh password-authenticated challenge for
 // an already configured account. It is used by the dashboard when Apple asks
@@ -231,6 +274,7 @@ func (l *Login) BeginAccountValidation() error {
 	l.result, l.adsid, l.idmsToken = res, adsid, idms
 	l.needsTwoFactor, l.client = res.NeedsTwoFactor, nil
 	l.storeCommerce = nil
+	l.gsaCheckpointed = false
 	if !l.needsTwoFactor {
 		return nil
 	}
@@ -392,11 +436,33 @@ func (l *Login) Client() (*Client, error) {
 	l.client = &Client{DSID: dt.DSID, ADSID: l.adsid, MMEAuthToken: dt.MMEAuthToken,
 		StorageBuyToken: spdToken(l.result.SessionPayload, "com.apple.gs.icloud.storage.buy"),
 		CloudKitToken:   dt.CloudKitToken, serviceData: dt.ServiceData}
+	if err := l.saveAcceptedICloud(); err != nil {
+		l.client = nil
+		return nil, err
+	}
 	return l.client, nil
 }
 
+// Stores can opt into passwordless restart without changing the base Store API.
+func (l *Login) saveAcceptedICloud() error {
+	store, ok := l.store.(interface {
+		SaveAcceptedICloud(string, RestoredICloudSession) error
+	})
+	if !ok {
+		return nil
+	}
+	c := l.client
+	if err := store.SaveAcceptedICloud(l.creds.AppleID, RestoredICloudSession{
+		DSID: c.DSID, ADSID: c.ADSID, MMEAuthToken: c.MMEAuthToken,
+		CloudKitToken: c.CloudKitToken, ServiceData: c.serviceData,
+	}); err != nil {
+		return fmt.Errorf("appleservices: save accepted iCloud session: %w", err)
+	}
+	return nil
+}
+
 // SaveSession checkpoints refreshed cookies for an already authenticated login.
-// Service tokens and account credentials remain in memory.
+// Passwords remain in memory; an opt-in store also saves accepted iCloud tokens.
 func (l *Login) SaveSession() error {
 	if l.client == nil || l.needsTwoFactor {
 		return errors.New("appleservices: complete authentication before saving the session")
@@ -411,7 +477,7 @@ func (l *Login) SaveSession() error {
 	if err := l.store.SaveSession(&sess); err != nil {
 		return fmt.Errorf("appleservices: save session: %w", err)
 	}
-	return nil
+	return l.saveAcceptedICloud()
 }
 
 func toGSASession(s Session) gsa.Session {

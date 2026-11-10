@@ -375,18 +375,19 @@ type StoreAuthenticationInfo struct {
 	Ready bool `json:"ready"`
 }
 
-// StoreCommerceSession keeps Store credentials and cookies together, only in
-// memory. Its private fields are never included in API responses.
+// StoreCommerceSession keeps Store credentials and cookies together. Private
+// fields never enter API responses; checkpoints require OS-protected storage.
 type StoreCommerceSession struct {
-	giftMu            sync.Mutex
-	gift              *giftCardState
-	client            *http.Client
-	identity          *storeSession
-	commerceUserAgent string
-	frameworkState    []byte
-	frameworkDSID     string
-	frameworkEmail    string
-	frameworkGUID     string
+	giftMu              sync.Mutex
+	gift                *giftCardState
+	client              *http.Client
+	identity            *storeSession
+	commerceUserAgent   string
+	frameworkState      []byte
+	frameworkDSID       string
+	frameworkEmail      string
+	frameworkGUID       string
+	frameworkCheckpoint []byte // credentials; exported only to an encrypted local store
 }
 
 func (s *StoreCommerceSession) MatchesAccount(dsid string) bool {

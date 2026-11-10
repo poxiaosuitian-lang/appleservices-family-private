@@ -287,11 +287,7 @@ func run() (runErr error) {
 	}
 	var login *appleservices.Login
 	if *resumeSession {
-		accepted, loadErr := store.LoadAcceptedICloud()
-		if loadErr != nil {
-			return errors.New("saved login session cannot be restored; reconnect with the current password")
-		}
-		login, err = appleservices.ResumeLogin(appleID, store, accepted, options...)
+		login, err = resumeSavedLogin(appleID, store, options...)
 	} else {
 		login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 	}
@@ -302,6 +298,22 @@ func run() (runErr error) {
 		return err
 	}
 	input := bufio.NewReader(os.Stdin)
+	localVerificationTried := false
+	verifyLocal := func(candidate *appleservices.Login) {
+		if localADI == nil || *listenOnly || *method == "sms-existing" || *method == "circle" {
+			return
+		}
+		attempted, verificationErr := candidate.CompleteLocalTwoFactor(func() (string, error) {
+			codeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			return generateCode(codeCtx)
+		})
+		localVerificationTried = attempted
+		if verificationErr != nil {
+			fmt.Fprintln(os.Stderr, "Local device verification requires manual completion; no automatic retry.")
+		}
+	}
+	verifyLocal(login)
 	if login.NeedsTwoFactor() && *method == "circle" {
 		if panel == nil || !*guiAuth {
 			return errors.New("Circle login requires the dashboard control API")
@@ -317,10 +329,10 @@ func run() (runErr error) {
 			return errVerificationRequired
 		}
 		factor := appleservices.SMS
-		if *method == "trusted-device" {
+		if *method == "trusted-device" || localVerificationTried {
 			factor = appleservices.TrustedDevice
 		}
-		if *method != "sms-existing" {
+		if *method != "sms-existing" && !localVerificationTried {
 			if err := login.RequestCode(factor); err != nil {
 				return err
 			}
@@ -428,6 +440,16 @@ func run() (runErr error) {
 	if ctx.Err() != nil {
 		return nil
 	}
+	// Restored local tokens are not proof of a live login. Require Apple to
+	// accept both device-management and iCloud access before showing online.
+	if *resumeSession {
+		if err != nil {
+			return errors.New("saved device session was not accepted; reconnect with the current password")
+		}
+		if _, quotaErr := login.StorageInfo(ctx); quotaErr != nil {
+			return errors.New("saved iCloud session was not accepted; reconnect with the current password")
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Could not verify account device status:", err)
 	} else {
@@ -447,6 +469,11 @@ func run() (runErr error) {
 	if err := active.SaveSession(); err != nil {
 		return err
 	}
+	if *resumeSession {
+		if _, err := login.RestoreStorePurchaseSession(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "Saved Store session needs a new check or reconnect; iCloud login is still available.")
+		}
+	}
 	status.Authenticated, status.State = true, "online"
 	if err != nil {
 		status.State = "device_query_failed"
@@ -454,6 +481,7 @@ func run() (runErr error) {
 	status.LastRefreshAt = time.Now().UTC()
 	if panel != nil {
 		panel.SetReady(!*listenOnly)
+		panel.SetStoreSessionReady(login.StorePurchaseSessionReady())
 	}
 	if err := status.save(*dir); err != nil {
 		return err
@@ -521,15 +549,18 @@ func run() (runErr error) {
 	defer refresh.Stop()
 	beginRenewal := func() (maintainedLogin, error) {
 		if *resumeSession {
-			accepted, err := store.LoadAcceptedICloud()
-			if err != nil {
-				return nil, err
-			}
-			return appleservices.ResumeLogin(appleID, store, accepted, options...)
+			return resumeSavedLogin(appleID, store, options...)
 		}
-		return appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+		renewed, err := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+		if err == nil {
+			verifyLocal(renewed)
+		}
+		return renewed, err
 	}
 	renew := func() control.Result {
+		if status.VerificationRequired {
+			return control.Result{Stage: "verification-required", Message: "需要完成账号验证或重新连接，后台不会自动重复申请验证码"}
+		}
 		renewed, devices, err := renewSessionMode(beginRenewal, accountID, registration, !*resumeSession)
 		if err != nil {
 			status.State = "refresh_failed"
@@ -1182,6 +1213,15 @@ func run() (runErr error) {
 			return renew()
 		}
 		if action == "validate-account" {
+			if *resumeSession {
+				// Validate the restored session with Apple instead of starting
+				// a password challenge that this worker cannot complete.
+				result := renew()
+				if result.OK {
+					result.Message = "Apple 已核验保存的登录会话，无需重新输入密码"
+				}
+				return result
+			}
 			if err := active.BeginAccountValidation(); err != nil {
 				status.State, status.VerificationRequired = "refresh_failed", true
 				_ = status.save(*dir)

@@ -43,6 +43,24 @@ func acceptedCheckpointReady(dir, appleID string) bool {
 	return err == nil
 }
 
+// A verified legacy session may obtain its missing delegate checkpoint at
+// startup. Never reinterpret corrupt or cross-account data as a missing file.
+func savedLoginReady(dir, appleID string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "session.json"))
+	var saved appleservices.Session
+	if err != nil || len(data) > 2<<20 || json.Unmarshal(data, &saved) != nil || appleID == "" ||
+		!strings.EqualFold(saved.AppleID, appleID) || saved.DSID == "" || saved.DeviceIdentityToken == "" {
+		return false
+	}
+	for _, service := range []string{"com.apple.gs.idms.pet", "com.apple.gs.idms.hb", "com.apple.gs.appleid.auth"} {
+		if saved.Tokens[service] == "" {
+			return false
+		}
+	}
+	_, err = os.Stat(filepath.Join(dir, "icloud-accepted.json"))
+	return os.IsNotExist(err) || err == nil && acceptedCheckpointReady(dir, appleID)
+}
+
 func (s *Server) acceptedStorageAction(parent context.Context, account *Account, includePlans bool) control.Result {
 	if account == nil {
 		return control.Result{Message: "账号不存在", Stage: "accepted-checkpoint"}
