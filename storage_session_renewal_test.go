@@ -60,7 +60,9 @@ func TestStoreSessionCannotCrossAccountOrAuthenticationBoundary(t *testing.T) {
 		mutate func(*Login)
 	}{
 		{"apple-id", func(l *Login) { l.creds.AppleID = "other@example.test" }},
+		{"missing-apple-id", func(l *Login) { l.creds.AppleID = " " }},
 		{"dsid", func(l *Login) { l.client.DSID = "other" }},
+		{"missing-dsid", func(l *Login) { l.client.DSID = "" }},
 		{"adsid", func(l *Login) { l.client.ADSID = "other" }},
 		{"missing-adsid", func(l *Login) { l.client.ADSID = "" }},
 		{"challenge", func(l *Login) { l.needsTwoFactor = true }},
@@ -78,5 +80,42 @@ func TestStoreSessionCannotCrossAccountOrAuthenticationBoundary(t *testing.T) {
 	renewed := &Login{creds: previous.creds, client: &Client{DSID: "test-dsid", ADSID: "test-adsid"}}
 	if renewed.InheritStorePurchaseSession(previous) || renewed.InheritStorePurchaseSession(nil) {
 		t.Fatal("invalid previous session inherited")
+	}
+}
+
+func TestStoreSessionRenewalRejectsUnusablePreviousSession(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*Login)
+	}{
+		{"challenge", func(l *Login) { l.needsTwoFactor = true }},
+		{"not-authenticated", func(l *Login) { l.client = nil }},
+		{"missing-commerce-session", func(l *Login) { l.storeCommerce = nil }},
+		{"empty-commerce-session", func(l *Login) { l.storeCommerce = &icloud.StoreCommerceSession{} }},
+		{"missing-apple-id", func(l *Login) { l.creds.AppleID = "" }},
+		{"missing-dsid", func(l *Login) { l.client.DSID = "" }},
+		{"missing-adsid", func(l *Login) { l.client.ADSID = "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previous := &Login{creds: Credentials{AppleID: "owner@example.test"}, client: &Client{DSID: "test-dsid", ADSID: "test-adsid"}, storeCommerce: fixtureCommerceSession(t)}
+			renewed := &Login{creds: previous.creds, client: &Client{DSID: "test-dsid", ADSID: "test-adsid"}}
+			test.mutate(previous)
+			if renewed.InheritStorePurchaseSession(previous) || renewed.storeCommerce != nil {
+				t.Fatal("unusable previous account inherited commerce credentials")
+			}
+		})
+	}
+	var empty *Login
+	if empty.InheritStorePurchaseSession(nil) {
+		t.Fatal("nil account reported a ready commerce session")
+	}
+}
+
+func TestStoreSessionRenewalKeepsNewSession(t *testing.T) {
+	previous := &Login{creds: Credentials{AppleID: "owner@example.test"}, client: &Client{DSID: "test-dsid", ADSID: "test-adsid"}, storeCommerce: fixtureCommerceSession(t)}
+	currentSession := fixtureCommerceSession(t)
+	renewed := &Login{creds: previous.creds, client: &Client{DSID: "test-dsid", ADSID: "test-adsid"}, storeCommerce: currentSession}
+	if !renewed.InheritStorePurchaseSession(previous) || renewed.storeCommerce != currentSession {
+		t.Fatal("renewal replaced a newly established commerce session")
 	}
 }

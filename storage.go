@@ -22,14 +22,20 @@ func (l *Login) StorePurchaseSessionReady() bool {
 
 // InheritStorePurchaseSession preserves the original HTTP client, cookie jar
 // and physical Store identity after a fully authenticated same-account renewal.
+// Reusable framework authentication state survives an expired commerce token,
+// but the return value reports only a ready commerce session.
 // It must not be used for a user-requested account validation or reconnection.
 // No commerce credential is serialized or copied to another account.
 func (l *Login) InheritStorePurchaseSession(previous *Login) bool {
-	if l == nil || l.needsTwoFactor || l.client == nil || !previous.StorePurchaseSessionReady() {
+	if l == nil || l.needsTwoFactor || l.client == nil || previous == nil || previous.needsTwoFactor || previous.client == nil {
 		return false
 	}
 	if strings.TrimSpace(l.creds.AppleID) == "" || !strings.EqualFold(l.creds.AppleID, previous.creds.AppleID) ||
-		l.client.DSID != previous.client.DSID || l.client.ADSID == "" || l.client.ADSID != previous.client.ADSID {
+		l.client.DSID == "" || l.client.DSID != previous.client.DSID || l.client.ADSID == "" || l.client.ADSID != previous.client.ADSID {
+		return false
+	}
+	if previous.storeCommerce == nil || (!previous.StorePurchaseSessionReady() &&
+		!previous.storeCommerce.CanReuseFrameworkState(previous.creds.AppleID, previous.client.DSID)) {
 		return false
 	}
 	if l.storeCommerce == nil {
@@ -76,9 +82,9 @@ func (l *Login) CheckStoragePurchaseSession(ctx context.Context, code string) (*
 	return &icloud.StoreAuthenticationInfo{Ready: true}, nil
 }
 
-// CheckSkillStoragePurchaseSession follows one matched Apple Store bag and
-// retains the same cookie session across password and Store 2FA. The provider
-// is called only after Apple requests a verification code.
+// CheckSkillStoragePurchaseSession uses the native framework helper, including
+// Apple's Store-specific machine provisioning. Credentials and proof state stay
+// in memory. The provider is called only after Apple requests a code.
 func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvider func() (string, error)) (*icloud.StoreAuthenticationInfo, error) {
 	if l.needsTwoFactor || l.client == nil {
 		return nil, errors.New("appleservices: complete iCloud login before Store authentication")
@@ -86,11 +92,7 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 	if l.storeCommerce.MatchesAccount(l.client.DSID) {
 		return &icloud.StoreAuthenticationInfo{Ready: true}, nil
 	}
-	headers, err := l.anisette.Headers()
-	if err != nil {
-		return nil, errors.New("appleservices: Store anisette generation failed")
-	}
-	session, err := icloud.AuthenticateMatchedSkillStore(ctx, l.creds.AppleID, l.creds.Password, headers, codeProvider)
+	session, err := icloud.AuthenticateFrameworkStore(ctx, l.creds.AppleID, l.creds.Password, l.client.DSID, l.storeCommerce, codeProvider)
 	if err != nil {
 		return nil, err
 	}

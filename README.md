@@ -40,6 +40,22 @@ Windows 本机验证码入口见下文。
 程序默认使用公共 anisette 服务池。设备标识及 provisioning 数据会发送给选用的 anisette 服务；
 账号密码和验证码由本程序直接提交 Apple 的登录接口。
 
+### 构建 Store 认证组件
+
+面板的 iCloud+ 购买预检查需要 `bin/storeauth.exe`。在项目目录运行：
+
+```powershell
+.\tools\storeauth\build.ps1
+# 可选：提前下载认证运行时资源，不登录账号或提交购买
+.\tools\storeauth\build.ps1 -Prepare
+```
+
+脚本从独立的 `tools/storeauth` 模块构建组件，默认加载
+`D:\appleservices-deps\environment.ps1`，可用 `-EnvironmentFile` 指定其他环境文件。
+Go 依赖和工具链缓存沿用该文件配置；运行时资源使用 `APPLESERVICES_CACHE_DIR`，
+未设置时缓存到 `D:\appleservices-deps\runtime-cache`，与一键启动面板一致。
+脚本退出时恢复原工作目录和环境变量。更新认证组件后重新构建，再运行 `run-ui.ps1`。
+
 ## 命令行
 
 ```powershell

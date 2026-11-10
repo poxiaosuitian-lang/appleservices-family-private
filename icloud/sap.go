@@ -377,8 +377,13 @@ type StoreAuthenticationInfo struct {
 // StoreCommerceSession keeps Store credentials and cookies together, only in
 // memory. Its private fields are never included in API responses.
 type StoreCommerceSession struct {
-	client   *http.Client
-	identity *storeSession
+	client            *http.Client
+	identity          *storeSession
+	commerceUserAgent string
+	frameworkState    []byte
+	frameworkDSID     string
+	frameworkEmail    string
+	frameworkGUID     string
 }
 
 func (s *StoreCommerceSession) MatchesAccount(dsid string) bool {

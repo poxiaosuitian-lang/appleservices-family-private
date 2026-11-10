@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $EnvironmentFile -PathType Leaf)) {
 . $EnvironmentFile
 $env:APPLESERVICES_CACHE_DIR = 'D:\appleservices-deps\runtime-cache'
 
-foreach ($relative in @('bin\dashboard.exe', 'bin\trusted-device-gui.exe',
+foreach ($relative in @('bin\dashboard.exe', 'bin\trusted-device-gui.exe', 'bin\storeauth.exe',
         '.cache\openbubbles-store\rust_lib_bluebubbles.dll', 'tools\mac-push-check.py')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $relative) -PathType Leaf)) {
         throw "Required file missing: $relative"

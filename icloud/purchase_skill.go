@@ -227,7 +227,7 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 	needsCode := false
 	challengeCode := ""
 	defer func() { challengeCode = "" }()
-	for attempt, redirects := 1, 0; attempt <= maxAttempts; attempt++ {
+	for attempt, redirects := 1, 0; ; {
 		code := challengeCode
 		var err error
 		if codeProvider != nil && needsCode && challengeCode == "" {
@@ -306,6 +306,7 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 							maxAttempts++
 						}
 						fmt.Println("Apple requests Store 2FA; continuing with the same cookie jar")
+						attempt++
 						continue
 					}
 					failure.Stage = "purchase-store-code-unverified"
@@ -325,7 +326,7 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 			return nil, &StorageError{Stage: "purchase-store-backoff", HTTPStatus: resp.StatusCode}
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.Header.Get("Location") != "" {
-			if redirects >= 4 {
+			if redirects >= 4 || (resp.StatusCode != 301 && resp.StatusCode != 302 && resp.StatusCode != 307 && resp.StatusCode != 308) {
 				return nil, &StorageError{Stage: "purchase-store-redirect", HTTPStatus: resp.StatusCode}
 			}
 			endpoint, err = validStoreRedirect(endpoint, resp.Header.Get("Location"))
@@ -333,6 +334,8 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 				return nil, &StorageError{Stage: "purchase-store-redirect", HTTPStatus: resp.StatusCode}
 			}
 			redirects++
+			// Navigation belongs to the same authentication attempt. Keep its
+			// routing budget, credential body and challenge code unchanged.
 			continue
 		}
 		switch resp.StatusCode {
@@ -359,8 +362,8 @@ func authenticateSkillStoreConfiguredMode(ctx context.Context, client *http.Clie
 			return nil, &StorageError{Stage: "purchase-store-timeout"}
 		case <-time.After(time.Second):
 		}
+		attempt++
 	}
-	return nil, &StorageError{Stage: "purchase-store-authentication"}
 }
 
 // SavePrivateSkillSession retains commerce credentials only in a new private
@@ -427,6 +430,9 @@ func (s *StoreCommerceSession) skillRequest(ctx context.Context, method, endpoin
 		return nil, 0, &StorageError{Stage: "purchase-skill-request"}
 	}
 	s.identity.setHeaders(req)
+	if s.commerceUserAgent != "" {
+		agent = s.commerceUserAgent
+	}
 	req.Header.Set("User-Agent", agent)
 	req.Header.Set("Accept", "application/json, application/x-apple-plist, text/html")
 	if contentType != "" {

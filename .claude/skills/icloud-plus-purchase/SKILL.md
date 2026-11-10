@@ -16,7 +16,11 @@ description: 通过苹果原生商店链路完成 iCloud+ 订阅购买、关闭�
 
 本文的具体成功参数来自一次已完成购买的历史实测。HTTP 状态、放行率、令牌寿命及某个失败的归因都是该次观测，不能保证另一个账号或当前服务器具有相同行为。尤其不能仅凭一次 delegate 失败断言账号未激活；激活验收使用 `.claude/skills/icloud-mac-nac-activation/SKILL.md` 的有效 MME 与实时配额标准。
 
-WebUI 当前使用 `AuthenticateMatchedSkillStore` 建立签名购买会话；下文无签名 native/fast 入口是历史诊断路径，不应作为默认入口或自动回退。上游 [ipatool #525](https://github.com/majd/ipatool/pull/525) 已将认证改为当前 bag 指定的 SAP 签名流程。SAP 初始化成功只证明本地签名器可用，不能代替 Apple 返回有效 Store 身份。认证仍返回空响应或通用 HTML 时，不得宣称购买链路已经修复，也不能据此判定密码、验证码或付款方式错误。
+WebUI 当前使用 `AuthenticateFrameworkStore` 和独立 `tools/storeauth` 组件建立购买会话，固定依赖 [ipatool e0e2908 的原生认证实现](https://github.com/majd/ipatool/blob/e0e2908dc866651cbd6ad86edd954119c003c46b/pkg/appstore/appstore_native_login.go)。该实现包含 Store 专用机器注册及 RP/SP 挑战处理；2026-11-10 对照已取得有效 Store 凭据。此前 `AuthenticateMatchedSkillStore` 和下文无签名 native/fast 入口保留为历史诊断路径，不再作为 WebUI 默认入口或自动回退。SAP 初始化成功本身不能代替 Apple 返回有效 Store 身份；空响应或通用 HTML 也不能据此判定密码、验证码或付款方式错误。
+
+组件只执行认证，以私有标准输入/输出传递凭据、完整 Cookie 属性及机器注册状态。父进程限制认证总时长，核对账号、DSID 和物理 GUID 后采用结果；密码、Store 凭据和机器注册状态仅驻留内存。自动续期只能在 AppleID、DSID、ADSID 全部一致时继承会话。只读订阅查询明确返回 401/403 并使原会话失效时，预检查允许一次同账号重新认证；购买请求不因此重放。构建方式见 `tools/storeauth/README.md`。
+
+2026-11-10 更新后的 WebUI 预检查实测返回 `purchase-prepared`：同账号 Store 认证、实时 50GB / USD 0.99 月报价、现有订阅读取均通过，当前配额仍为免费 5GB。此次未提交购买，因此这份证据证明购买前链路可用，不代表扣款及付费容量开通已经验证。集成时还修复了 Apple 从认证域发送兄弟域清理 Cookie 的兼容问题：遵循标准 Cookie jar 忽略无效域作用范围，不能因此中断整次登录或放宽 Cookie 域限制。
 
 ### 认证回归与当前验收边界
 
