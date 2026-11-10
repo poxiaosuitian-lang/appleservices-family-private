@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Laky-64/appleservices"
+	"github.com/Laky-64/appleservices/internal/mailsetup"
 )
 
 func TestFirstLoginCreatesIdentityBeforePushAndReusesItOnRetry(t *testing.T) {
@@ -61,6 +62,10 @@ func TestFirstLoginCreatesIdentityBeforePushAndReusesItOnRetry(t *testing.T) {
 		t.Fatal("first account was not persisted for a retry after restart")
 	}
 	data, err := os.ReadFile(registryPath(root))
+	mail, mailErr := mailsetup.Load(accountDir, creds.AppleID)
+	if mailErr != nil || !mail.AutoCreate || mail.Phase != "pending" || mail.Submitted {
+		t.Fatal("new account did not retain its unsubmitted mailbox task across failed login/retry")
+	}
 	if err != nil || bytes.Contains(data, []byte(creds.Password)) {
 		t.Fatal("registry unavailable or contains the password")
 	}

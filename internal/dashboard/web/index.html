@@ -309,6 +309,36 @@
     </form>
   </section>
 
+  <section class="request-card overview-only icloud-panel" id="primaryMailCard">
+    <div class="card-title-row">
+      <h3>iCloud 主邮箱</h3>
+      <button class="button button-light button-sm" type="button" id="primaryMailCheck" disabled>检查邮箱状态</button>
+    </div>
+    <p id="primaryMailSummary" class="card-description" role="status">新导入账号登录后自动检查；已有邮箱直接复用，没有则自动创建。</p>
+    <p id="primaryMailAddress" class="storage-headline" hidden></p>
+    <div class="button-row">
+      <button class="button button-light button-sm" type="button" id="primaryMailEnsure" disabled>检查并创建邮箱</button>
+      <a class="button button-light button-sm" href="https://www.icloud.com/mail/" target="_blank" rel="noopener noreferrer">打开 iCloud 邮件</a>
+    </div>
+    <p class="cache-note">默认使用账号前缀，重名时添加短后缀。需要额外验证时，请在 Apple 页面完成后再检查。</p>
+  </section>
+
+  <section class="request-card overview-only icloud-panel" id="securityQuestionsCard">
+    <div class="card-title-row">
+      <h3>安全提示问题</h3>
+      <button class="button button-light button-sm" id="securityQuestionsRead" type="button" disabled>读取验证问题</button>
+    </div>
+    <p class="card-description" id="securityQuestionsSummary" role="status">Apple 要求密保验证时，这里会显示具体题目。答案按账号独立加密保存在本机，之后自动使用。</p>
+    <form id="securityQuestionsForm" autocomplete="off">
+      <div id="securityQuestionsFields"></div>
+      <div class="button-row">
+        <button class="button button-primary button-sm" id="securityQuestionsSave" type="submit" disabled>加密保存并继续验证</button>
+        <button class="button button-light button-sm" id="securityQuestionsClear" type="button" disabled>清除已保存答案</button>
+      </div>
+    </form>
+    <p class="cache-note">已保存的答案不回显。留空保留原答案；答案错误需修改后重试，额外安全验证请在 <a href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">Apple 账户页面</a> 完成。</p>
+  </section>
+
   <section class="request-card overview-only icloud-panel storage-card">
     <div class="card-title-row">
       <div class="title-with-badge">
@@ -647,6 +677,7 @@
     <label for="password">账户密码</label>
     <input id="password" name="password" type="password" autocomplete="off" placeholder="输入 Apple 账户密码" required>
     <label class="remember-login"><input id="rememberPassword" type="checkbox"> 在此电脑加密记住密码，用于会话失效后自动重连</label>
+    <p class="cache-note">新账号连接成功后会自动检查 iCloud 主邮箱；没有则按账号前缀创建，已有邮箱不变。</p>
     <label for="twofactor">首次双重验证方式</label>
     <select id="twofactor" name="twofactor">
       <option value="trusted-device">受信任设备验证码（推荐）</option>

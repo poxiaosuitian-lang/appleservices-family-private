@@ -23,6 +23,7 @@ import (
 
 	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/control"
+	"github.com/Laky-64/appleservices/internal/mailsetup"
 )
 
 //go:embed web/*
@@ -74,32 +75,34 @@ type Status struct {
 	FailureStage         string    `json:"failure_stage,omitempty"`
 }
 type view struct {
-	GiftCardAvailable            bool                    `json:"gift_card_available"`
-	PurchasePreparationAvailable bool                    `json:"purchase_preparation_available"`
-	StoreSessionReady            *bool                   `json:"store_session_ready,omitempty"`
-	Status                       Status                  `json:"status"`
-	Devices                      []control.Device        `json:"devices"`
-	Pending                      *control.Pending        `json:"pending"`
-	CodeReady                    bool                    `json:"code_ready"`
-	ControlReady                 bool                    `json:"control_ready"`
-	Launching                    bool                    `json:"launching"`
-	Message                      string                  `json:"message"`
-	Account                      string                  `json:"account"`
-	LoginAccount                 string                  `json:"login_account,omitempty"`
-	Accounts                     []AccountView           `json:"accounts,omitempty"`
-	Selected                     string                  `json:"selected,omitempty"`
-	ICloudActivated              bool                    `json:"icloud_activated"`
-	Family                       *control.FamilyInfo     `json:"family,omitempty"`
-	FamilyCheckedAt              string                  `json:"family_checked_at,omitempty"`
-	FamilyStale                  bool                    `json:"family_stale"`
-	Storage                      *icloud.StorageInfo     `json:"storage,omitempty"`
-	StorageCheckedAt             string                  `json:"storage_checked_at,omitempty"`
-	StorageStale                 bool                    `json:"storage_stale"`
-	StoragePlan                  *icloud.StoragePlanInfo `json:"storage_plan,omitempty"`
-	StoragePlanCheckedAt         string                  `json:"storage_plan_checked_at,omitempty"`
-	StoragePlanStale             bool                    `json:"storage_plan_stale"`
-	HideMyEmailAvailable         bool                    `json:"hide_my_email_available"`
-	ActivationReady              bool                    `json:"activation_ready"`
+	SecurityQuestions            *icloud.SecurityQuestionsStatus `json:"security_questions,omitempty"`
+	PrimaryMail                  *mailsetup.State                `json:"primary_mail,omitempty"`
+	GiftCardAvailable            bool                            `json:"gift_card_available"`
+	PurchasePreparationAvailable bool                            `json:"purchase_preparation_available"`
+	StoreSessionReady            *bool                           `json:"store_session_ready,omitempty"`
+	Status                       Status                          `json:"status"`
+	Devices                      []control.Device                `json:"devices"`
+	Pending                      *control.Pending                `json:"pending"`
+	CodeReady                    bool                            `json:"code_ready"`
+	ControlReady                 bool                            `json:"control_ready"`
+	Launching                    bool                            `json:"launching"`
+	Message                      string                          `json:"message"`
+	Account                      string                          `json:"account"`
+	LoginAccount                 string                          `json:"login_account,omitempty"`
+	Accounts                     []AccountView                   `json:"accounts,omitempty"`
+	Selected                     string                          `json:"selected,omitempty"`
+	ICloudActivated              bool                            `json:"icloud_activated"`
+	Family                       *control.FamilyInfo             `json:"family,omitempty"`
+	FamilyCheckedAt              string                          `json:"family_checked_at,omitempty"`
+	FamilyStale                  bool                            `json:"family_stale"`
+	Storage                      *icloud.StorageInfo             `json:"storage,omitempty"`
+	StorageCheckedAt             string                          `json:"storage_checked_at,omitempty"`
+	StorageStale                 bool                            `json:"storage_stale"`
+	StoragePlan                  *icloud.StoragePlanInfo         `json:"storage_plan,omitempty"`
+	StoragePlanCheckedAt         string                          `json:"storage_plan_checked_at,omitempty"`
+	StoragePlanStale             bool                            `json:"storage_plan_stale"`
+	HideMyEmailAvailable         bool                            `json:"hide_my_email_available"`
+	ActivationReady              bool                            `json:"activation_ready"`
 }
 type credentials struct {
 	RememberPassword *bool  `json:"remember_password,omitempty"`
@@ -224,6 +227,10 @@ func (s *Server) addAccount(ctx context.Context, creds credentials) (control.Res
 		return control.Result{Message: err.Error()}, ""
 	}
 	entry := &registryEntry{ID: id, Name: strings.SplitN(creds.AppleID, "@", 2)[0], AppleID: strings.TrimSpace(creds.AppleID), Dir: dir}
+	if err := mailsetup.Queue(dir, entry.AppleID); err != nil {
+		s.accountsMu.Unlock()
+		return control.Result{Message: "无法建立新账号的邮箱任务"}, ""
+	}
 	entries = append(entries, entry)
 	if err := saveRegistry(s.config.Dir, entries); err != nil {
 		s.accountsMu.Unlock()
@@ -445,7 +452,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	if action, ok := body.(control.Action); ok {
 		if action.Action == "gift-prepare" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
-		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") {
+		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") || strings.HasPrefix(action.Action, "mail-") {
 			timeout = 2*time.Minute + 5*time.Second
 		}
 	}
@@ -783,6 +790,8 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 	if account != nil {
 		result.Selected = account.ID
 		result.LoginAccount = account.AppleID
+		result.PrimaryMail, _ = mailsetup.Load(account.Dir, account.AppleID)
+		result.SecurityQuestions = readSecurityQuestionsStatus(account)
 		result.ICloudActivated = acceptedCheckpointReady(account.Dir, account.AppleID)
 		result.ActivationReady = !result.ICloudActivated && verifiedGSACheckpointReady(account.Dir, account.AppleID)
 		if family, checkedAt, stale := readFamilyCache(account); family != nil {

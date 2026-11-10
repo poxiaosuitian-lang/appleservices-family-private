@@ -637,6 +637,31 @@ function scheduleAutoRefresh(view, activated) {
 
 function hasPaidStorage(view) { return !!view?.storage && !view.storage_stale && view.storage.paid_bytes > 0; }
 
+let securityQuestionsKey = '';
+function renderSecurityQuestions(view, ready) {
+  const status = view.security_questions, questions = status?.questions || [];
+  const key = JSON.stringify([selectedAccount, questions]);
+  if (key !== securityQuestionsKey) {
+    securityQuestionsKey = key;
+    const fields = $('securityQuestionsFields');
+    fields.replaceChildren();
+    for (const question of questions) {
+      const label = document.createElement('label'), caption = document.createElement('span'), input = document.createElement('input');
+      caption.textContent = question.question + (question.saved ? '（已加密保存）' : '');
+      input.type = 'password'; input.autocomplete = 'new-password'; input.maxLength = 128;
+      input.dataset.questionId = String(question.id); input.placeholder = question.saved ? '留空保留原答案' : '填写此问题的答案';
+      label.append(caption, input); fields.append(label);
+    }
+  }
+  $('securityQuestionsSummary').textContent = status?.blocked ? (status.blocked_reason === 'rejected' ? 'Apple 未接受上次答案，已暂停自动提交。请修正答案后保存。' : status.blocked_reason === 'additional-verification' ? '答案已加密保存，Apple 仍要求后续安全验证。请在 Apple 账户页面完成后，点击读取验证问题继续。' : '上次安全验证未完成，已暂停自动提交。请检查账号状态后再点击读取验证问题。')
+    : questions.length ? '已保存 ' + questions.filter(q => q.saved).length + ' / ' + questions.length + ' 个答案；需要时按问题编号自动验证。'
+    : 'Apple 要求密保验证时，这里会显示具体题目。答案按账号独立加密保存在本机，之后自动使用。';
+  $('securityQuestionsRead').disabled = busy || !ready;
+  $('securityQuestionsSave').disabled = busy || !ready || !questions.length;
+  $('securityQuestionsClear').disabled = busy || !ready || !questions.some(q => q.saved);
+  $('securityQuestionsFields').querySelectorAll('input').forEach(input => { input.disabled = busy || !ready; });
+}
+
 function render(view) {
   current = view;
   selectedAccount = view.selected || selectedAccount;
@@ -655,6 +680,15 @@ function render(view) {
   renderActivation(view);
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
+  const mail = view.primary_mail, mailWorking = ['checking', 'submitted'].includes(mail?.phase) && online && Date.now() - Date.parse(mail?.updated_at || '') < 120000;
+  $('primaryMailSummary').textContent = mail?.message || '新导入账号登录后自动检查；已有邮箱直接复用，没有则自动创建。';
+  $('primaryMailAddress').textContent = mail?.email || '';
+  $('primaryMailAddress').hidden = !mail?.email;
+  $('primaryMailCheck').disabled = busy || !online || !view.control_ready || mailWorking;
+  $('primaryMailEnsure').disabled = busy || !online || !view.control_ready || mailWorking;
+  $('primaryMailEnsure').hidden = mail?.phase === 'ready' || !!mail?.submitted;
+  $('primaryMailEnsure').textContent = mail?.auto_create ? '继续检查并创建' : '检查并创建邮箱';
+  renderSecurityQuestions(view, online && view.control_ready && !mailWorking);
   const sessionCard = $('sessionCard');
   if (sessionCard) {
     sessionCard.classList.toggle('is-online', !!online);
@@ -1089,6 +1123,33 @@ $('codeButton').addEventListener('click', () => action('code'));
 $('devicesButton').addEventListener('click', () => action('devices'));
 $('renewButton').addEventListener('click', () => action('validate-account'));
 $('storageButton').addEventListener('click', () => action('storage-info'));
+$('primaryMailCheck').addEventListener('click', () => action('mail-check'));
+$('primaryMailEnsure').addEventListener('click', () => action('mail-ensure'));
+$('securityQuestionsRead').addEventListener('click', async () => {
+  const account = selectedAccount;
+  if (current?.security_questions?.blocked && current.security_questions.blocked_reason !== 'rejected') {
+    const result = await action('security-resume');
+    if (!result?.ok || account !== selectedAccount) return;
+  }
+  await action('mail-check');
+});
+$('securityQuestionsClear').addEventListener('click', async () => {
+  document.querySelectorAll('#securityQuestionsFields input').forEach(input => { input.value = ''; });
+  await action('security-clear');
+});
+$('securityQuestionsForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy) return;
+  const account = selectedAccount, autoCreate = !!current?.primary_mail?.auto_create;
+  const answers = [...document.querySelectorAll('#securityQuestionsFields input')]
+    .filter(input => input.value.trim()).map(input => ({id:Number(input.dataset.questionId), answer:input.value}));
+  if (!answers.length) { notice('请填写需要保存或修改的答案', true); return; }
+  document.querySelectorAll('#securityQuestionsFields input').forEach(input => { input.value = ''; });
+  try {
+    const result = await action('security-save', {security_answers:answers});
+    if (result?.ok && account === selectedAccount) await action(autoCreate ? 'mail-ensure' : 'mail-check');
+  } finally { answers.forEach(answer => { answer.answer = ''; }); }
+});
 $('activationCheckButton').addEventListener('click', () => action('activation-plan'));
 $('activationAcceptButton').addEventListener('click', () => {
   if (!activationInfo?.required) return;

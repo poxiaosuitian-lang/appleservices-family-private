@@ -24,6 +24,7 @@ import (
 	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/circle"
 	"github.com/Laky-64/appleservices/internal/control"
+	"github.com/Laky-64/appleservices/internal/mailsetup"
 	"github.com/Laky-64/appleservices/nativeadi"
 )
 
@@ -650,6 +651,7 @@ func run() (runErr error) {
 		return control.Result{OK: true, Message: "登录已续期，设备列表已更新"}
 	}
 	var hmeClient *icloud.HideMyEmailClient
+	securityAnswers := accountSecurityAnswers{store: store, appleID: appleID}
 	var accountManagementClient *icloud.AppleAccountClient
 	pendingHMECandidate := ""
 	pendingReachableEmail := ""
@@ -663,6 +665,7 @@ func run() (runErr error) {
 			if clientErr != nil {
 				return nil, clientErr
 			}
+			hmeClient.SetSecurityQuestionsProvider(securityAnswers)
 		}
 		info, err := hmeClient.List(actionCtx)
 		if !errors.Is(err, icloud.ErrHMEAuthenticationRequired) {
@@ -673,7 +676,27 @@ func run() (runErr error) {
 		}
 		return hmeClient.List(actionCtx)
 	}
-	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string) control.Result {
+	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+		if action == "security-resume" {
+			if err := securityAnswers.resume(); err != nil {
+				return control.Result{Message: err.Error(), Stage: "security-questions"}
+			}
+			return control.Result{OK: true, Message: "已允许再次检查安全验证", Stage: "security-questions"}
+		}
+		if action == "security-save" || action == "security-clear" {
+			if err := securityAnswers.update(answers, action == "security-clear"); err != nil {
+				return control.Result{Message: err.Error(), Stage: "security-questions"}
+			}
+			return control.Result{OK: true, Message: "安全问题答案已使用 Windows 本机加密更新", Stage: "security-questions"}
+		}
+		if action == "mail-check" || action == "mail-ensure" {
+			mailClient, mailErr := icloud.NewPrimaryMailClient(*dir, appleID)
+			if mailErr != nil {
+				return control.Result{Message: "无法初始化 iCloud 邮箱客户端", Stage: "primary-mail"}
+			}
+			mailClient.SetSecurityQuestionsProvider(securityAnswers)
+			return primaryMailAction(actionCtx, *dir, appleID, password, generateCode, action == "mail-check", mailClient)
+		}
 		defer func() {
 			if panel != nil {
 				ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
@@ -691,6 +714,7 @@ func run() (runErr error) {
 			if clientErr != nil {
 				return control.Result{Message: "无法初始化隐藏邮件地址客户端", Stage: "hme-session"}
 			}
+			hmeClient.SetSecurityQuestionsProvider(securityAnswers)
 			err := hmeClient.AcceptPendingTerms(queryCtx)
 			if errors.Is(err, icloud.ErrHMEWebRepairSessionUnavailable) {
 				err = hmeClient.AuthenticateAndAcceptTerms(queryCtx, password, generateCode)
@@ -771,6 +795,7 @@ func run() (runErr error) {
 				if clientErr != nil {
 					return control.Result{Message: "无法初始化 Apple 账户管理会话", Stage: "hme-reachable-session"}
 				}
+				accountManagementClient.SetSecurityQuestionsProvider(securityAnswers)
 				if clientErr = accountManagementClient.Resume(queryCtx); clientErr != nil {
 					if password == "" {
 						accountManagementClient = nil
@@ -1412,8 +1437,19 @@ func run() (runErr error) {
 		}
 		return control.Result{OK: true, Code: code, HideAt: time.Now().Add(time.Minute).UTC(), Message: "操作已完成"}
 	}
+	// Only newly added accounts have a queued intent. Existing accounts are
+	// never provisioned as a side effect of upgrading/restarting the worker.
+	var autoMail <-chan time.Time
+	if task, loadErr := mailsetup.Load(*dir, appleID); loadErr == nil && task.AutoCreate && task.Phase != "ready" && !*listenOnly {
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		autoMail = timer.C
+	}
 	for {
 		select {
+		case <-autoMail:
+			autoMail = nil // once per successful connection; no polling/retry loop
+			performAction(ctx, "mail-ensure", "", "", "", "", nil)
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) || (*listenFor > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 				return nil
@@ -1485,7 +1521,7 @@ func run() (runErr error) {
 				command.Reply <- control.Result{Message: "请重新查看当前登录请求"}
 				continue
 			}
-			command.Reply <- performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note)
+			command.Reply <- performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers)
 		case <-refresh.C:
 			result := renew()
 			if status.VerificationRequired {
@@ -1585,7 +1621,7 @@ func run() (runErr error) {
 			if choice != "devices" && choice != "refresh" && choice != "code" && choice != "allow" && choice != "deny" {
 				continue
 			}
-			result := performAction(ctx, choice, "", "", "", "")
+			result := performAction(ctx, choice, "", "", "", "", nil)
 			if result.Code != "" {
 				fmt.Println("Apple verification code:", result.Code)
 			} else {
