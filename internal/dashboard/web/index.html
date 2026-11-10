@@ -51,6 +51,17 @@
     <p class="card-description">付款准备：使用该账号适用的付款方式或 Apple 账户余额。使用礼品卡时，请在官方客户端登录同一个账号，兑换与账号地区一致的礼品卡，并核对余额到账。</p>
     <p class="card-description">Windows：Apple Music 侧栏姓名 → 兑换；Mac：App Store 侧栏姓名 → 兑换代码。兑换成功后点击下方重新检查，再点击开通并确认订阅。部分购买仍可能要求登记付款方式，以 Apple 实际要求为准。</p>
     <p class="card-description"><a href="https://support.apple.com/zh-cn/118242" target="_blank" rel="noopener noreferrer">官方礼品卡兑换说明 ↗</a> · <a id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">管理付款方式 ↗</a></p>
+    <div class="gift-card-flow">
+      <h4>礼品卡协议兑换</h4>
+      <p class="card-description">先检查当前账号的兑换会话，再输入用于充值余额的 16 位礼品卡代码。请勿输入订阅优惠码。提交后会消耗兑换码，兑换结果不明时请先核对 Apple 官方余额。</p>
+      <button class="button button-light" id="giftPrepareButton" disabled>检查兑换会话</button>
+      <form id="giftRedeemForm" autocomplete="off">
+        <label for="giftCode">礼品卡兑换码</label>
+        <input id="giftCode" type="password" maxlength="16" autocomplete="off" spellcheck="false" placeholder="先检查兑换会话" disabled>
+        <button class="button button-light" id="giftRedeemButton" disabled>确认兑换</button>
+      </form>
+      <p class="card-description" id="giftResult" role="status">会话检查不验证卡码、不查询余额；兑换码不写入日志或本地存储。</p>
+    </div>
     <button class="button button-light" id="paymentCheckButton" disabled>付款准备完成，重新检查</button>
     <p class="cache-note">重新检查只查询容量、报价和订阅并验证购买会话，不会扣款。面板不读取账户余额、不收集兑换码；遇到购买结果不明时，先查询容量和官方订阅记录。</p>
   </div><div id="planList" class="plan-list"></div></section>

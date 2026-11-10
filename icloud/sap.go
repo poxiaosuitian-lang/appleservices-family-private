@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Laky-64/appleservices/internal/sap"
@@ -377,6 +378,8 @@ type StoreAuthenticationInfo struct {
 // StoreCommerceSession keeps Store credentials and cookies together, only in
 // memory. Its private fields are never included in API responses.
 type StoreCommerceSession struct {
+	giftMu            sync.Mutex
+	gift              *giftCardState
 	client            *http.Client
 	identity          *storeSession
 	commerceUserAgent string

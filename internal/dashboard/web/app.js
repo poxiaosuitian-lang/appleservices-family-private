@@ -2,6 +2,7 @@
 const $=id=>document.getElementById(id), token=document.querySelector('meta[name="app-token"]').content;
 let loginMode='reconnect',loginAccount='',current=null,busy=false,privateCode='',privateCodeKind='',hideAt=0,lastState='',lastQuery='',lastRefresh='',lastRequest='',noticeTimer,selectedAccount=localStorage.getItem('selected-account')||'',familyInfo=null,familyAccount='',familyCheckedAt='',familyStale=false,storageAccount='',storageCheckedAt='',planAccount='',planCheckedAt='',poolOrganizerAccount=localStorage.getItem('family-organizer-account')||'',poolOrganizerName=localStorage.getItem('family-organizer-name')||'',purchaseAction='',purchaseLabel='',hmeInfo=null,hmeAccount='',hmeCandidate='',hmeFilter='active',hmeVisible=100,hmeEditing='',activationInfo=null,activationAccount='',autoRefreshScheduled=false;
 let storeAuthReady=false,storeAuthAccount='',storeAuthPID=0,storeAuthRefresh='';
+let giftPreparation='',giftOwner='',giftPID=0;
 const autoRefreshState=new Map();
 const autoRefreshOwner=(globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2));
 function autoRefreshLeaseKey(account){return 'appleservices:auto-refresh:'+account;}
@@ -95,6 +96,11 @@ if(typeof view.store_session_ready==='boolean'){
   if(storeAuthReady)$('storeAuthSummary').textContent='购买会话已保留 · 同一账号登录续期后继续使用 · Apple 仍可能要求重新验证';
   else if(wasReady)$('storeAuthSummary').textContent='购买会话不可用，请重新验证购买会话。';
 }
+if(giftOwner!==selectedAccount||giftPID!==(status.pid||0)||!online){giftPreparation='';$('giftCode').value='';$('giftResult').textContent='先检查当前账号的兑换会话；会话检查不会提交兑换。';giftOwner=selectedAccount;giftPID=status.pid||0;}
+$('giftPrepareButton').disabled=busy||!online||!view.control_ready||!view.gift_card_available;
+$('giftCode').disabled=busy||!giftPreparation;
+$('giftRedeemButton').disabled=busy||!online||!view.control_ready||!giftPreparation||!/^X[A-Z0-9]{15}$/.test($('giftCode').value.trim().toUpperCase());
+if(online&&!view.gift_card_available)$('giftResult').textContent='请重新连接当前账号加载礼品卡兑换功能。';
 const titles={initializing:'正在初始化本机身份',signing_in:'正在登录 Apple 账户',starting:'正在建立后台连接',refresh_failed:'登录刷新暂未完成',verification_required:'需要重新验证账户',awaiting_sms:'完成短信验证',awaiting_existing_sms:'输入已有短信验证码',awaiting_device_code:'输入设备验证码',awaiting_account_validation:'验证 Apple 账户',awaiting_pairing:'等待设备配对',awaiting_pairing_code:'输入设备配对码',verifying_pairing:'正在验证设备配对'};
 $('sessionTitle').textContent=online?(status.push_issue==='reconnecting'?'登录正常 · 推送重连中':status.state==='refresh_failed'?'已登录 · 续期暂未完成':'登录持续在线'):(titles[status.state]||(status.state==='failed'&&!activated?'后台异常停止':starting?'正在连接 Apple':waiting?'需要短信验证':activated?'iCloud 已激活':'连接你的 Apple 账户'));
 $('sessionDescription').textContent=online?(status.push_issue==='reconnecting'?'账户会话仍保留，后台正在恢复推送连接。':'设备身份已保留，后台会自动保持登录。'):waiting?(status.state==='awaiting_account_validation'?'请使用受信任 Apple 设备收到的验证码完成账户验证。':'请使用绑定手机号收到的验证码完成登录。'):starting?'正在恢复这台电脑的设备身份，请稍等。':activated?'Apple 已接受该账号的 iCloud 会话，可直接读取配额与可购方案。':status.state==='failed'?'后台运行出错，设备身份和已保存的会话仍保留。请重新连接。':'登录后，即可查看设备和生成本机验证码。';
@@ -164,6 +170,11 @@ async function action(name,extra={},options={}){
     if(name==='storage-purchase-prepare-us'&&actionAccount===selectedAccount){
       $('purchaseResult').textContent=(result.message||'购买预检查未完成，未提交购买')+(result.stage?' · '+result.stage:'')+(result.http_status?' · HTTP '+result.http_status:'')+(result.apple_code?' · Apple 错误码：'+result.apple_code:'');
       $('purchaseResult').hidden=false;
+    }
+    if(name.startsWith('gift-')&&actionAccount===selectedAccount&&actionPID===(current?.status?.pid||0)){
+      const gift=result.gift_card;
+      if(name==='gift-prepare'&&result.ok&&gift?.ready){giftPreparation=gift.preparation_id||'';$('giftCode').placeholder='16 位充值礼品卡代码';}
+      $('giftResult').textContent=(result.message||'兑换结果未确认')+(gift?.state==='completed'?' · 入账 '+gift.credited+' · 余额 '+gift.balance:'')+(result.apple_code?' · Apple 错误码 '+result.apple_code:'');
     }
     const purchaseRequest=['storage-purchase','storage-skill-purchase-us'].includes(name);
     if(purchaseRequest&&actionAccount===selectedAccount){
@@ -254,6 +265,18 @@ $('hmeMoreButton').addEventListener('click',()=>{hmeVisible+=100;renderHME(hmeIn
 $('closeHMEEdit').addEventListener('click',()=>{$('hmeEditDialog').close();hmeEditing='';});
 $('hmeEditDialog').addEventListener('close',()=>{hmeEditing='';});
 $('hmeEditForm').addEventListener('submit',event=>{event.preventDefault();const email=hmeEditing,label=$('hmeEditLabel').value.trim(),note=$('hmeEditNote').value.trim();if(!email||!label)return;$('hmeEditDialog').close();action('hme-update',{code:email,label,note});});
+$('giftPrepareButton').addEventListener('click',()=>{if(busy)return;giftPreparation='';$('giftCode').value='';$('giftResult').textContent='正在验证当前账号的兑换会话，尚未提交兑换…';action('gift-prepare');});
+$('giftCode').addEventListener('input',()=>{if(current)render(current);});
+$('giftRedeemForm').addEventListener('submit',async event=>{
+  event.preventDefault();
+  if(busy||!giftPreparation)return;
+  const code=$('giftCode').value.trim().toUpperCase();
+  if(!/^X[A-Z0-9]{15}$/.test(code))return;
+  if(!confirm('确认将这张充值礼品卡兑换到 '+(current?.login_account||current?.account||'当前账号')+'？兑换码将被消耗；本次只提交兑换，不会自动购买订阅。'))return;
+  const preparation=giftPreparation;giftPreparation='';$('giftCode').value='';
+  $('giftResult').textContent='已发起单次兑换，正在等待 Apple 结果。结果不明时先核对官方余额，不要重复提交。';
+  await action('gift-redeem',{code,request_id:preparation});
+});
 $('paymentCheckButton').addEventListener('click',async()=>{
   if(busy)return;
   const account=selectedAccount;

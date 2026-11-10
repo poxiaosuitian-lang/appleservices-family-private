@@ -860,6 +860,50 @@ func run() (runErr error) {
 			}
 			return control.Result{OK: true, Message: "实时验证码已在同一 Store 会话中通过；未提交购买", StoreAuthentication: info}
 		}
+
+		if action == "gift-prepare" || action == "gift-redeem" {
+			redeemer, ok := active.(interface {
+				PrepareGiftCard(context.Context, func() (string, error)) (*icloud.GiftCardInfo, error)
+				RedeemGiftCard(context.Context, string, string) (*icloud.GiftCardInfo, error)
+			})
+			if !ok {
+				return control.Result{Message: "请重新连接账号加载兑换协议", Stage: "worker-upgrade-required"}
+			}
+			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
+			defer done()
+			var info *icloud.GiftCardInfo
+			var err error
+			if action == "gift-prepare" {
+				info, err = redeemer.PrepareGiftCard(queryCtx, func() (string, error) { return generateCode(queryCtx) })
+			} else {
+				info, err = redeemer.RedeemGiftCard(queryCtx, visibleRequestID, commandCode)
+			}
+			result := control.Result{GiftCard: info, Stage: "gift-result", Message: "兑换未确认，请核对官方账户余额；不会自动重试"}
+			if err != nil {
+				var failure *icloud.StorageError
+				if errors.As(err, &failure) {
+					result.Stage = failure.Stage
+					result.HTTPStatus = failure.HTTPStatus
+				}
+				return result
+			}
+			if info != nil {
+				result.AppleCode = info.AppleCode
+				switch info.State {
+				case "prepared":
+					result.OK = true
+					result.Message = "兑换会话和账号已核验；尚未提交兑换"
+				case "completed":
+					result.OK = true
+					result.Message = "Apple 已确认礼品卡入账，已返回入账金额与余额"
+				case "rejected":
+					result.Message = "Apple 未接受此次兑换，请核对兑换码及官方余额；不会自动重试"
+				case "confirmation-required":
+					result.Message = "Apple 要求额外处理，请使用官方客户端核对；程序不会继续确认或开通其他订阅"
+				}
+			}
+			return result
+		}
 		if action == "storage-purchase-prepare-us" {
 			preparer, ok := active.(interface {
 				PrepareSkillStoragePurchase(context.Context, appleservices.PurchaseTarget, func() (string, error)) (*appleservices.StoragePurchasePreparation, error)

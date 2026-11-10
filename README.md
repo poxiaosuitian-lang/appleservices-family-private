@@ -17,6 +17,8 @@ Windows 本机验证码入口见下文。
 
 iCloud+ 开通与礼品卡付款准备见 [开通流程](docs/icloud-purchase.md)：官方客户端兑换 → 面板预检查 → 确认订阅 → 核验付费容量。
 
+新增[礼品卡协议兑换](docs/gift-card-protocol.md)：无需打开 Apple Music；会话准备已实测，新的礼品卡实际入账仍待验收。
+
 ## Windows 运行
 
 需要 Go 1.26 或更新版本（已有 `bin/login.exe` 时可直接运行）。

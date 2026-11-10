@@ -54,6 +54,7 @@ type Action struct {
 	Note      string `json:"note,omitempty"`
 }
 type Result struct {
+	GiftCard            *icloud.GiftCardInfo            `json:"gift_card,omitempty"`
 	OK                  bool                            `json:"ok"`
 	Message             string                          `json:"message,omitempty"`
 	Code                string                          `json:"code,omitempty"`
@@ -185,7 +186,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
-		view := View{Status: data, Devices: s.devices, Pending: s.pending, CodeReady: s.ready, StoreSessionReady: s.storeReady, Capabilities: []string{"hide-my-email", "store-session-status", "storage-purchase-prepare"}}
+		view := View{Status: data, Devices: s.devices, Pending: s.pending, CodeReady: s.ready, StoreSessionReady: s.storeReady, Capabilities: []string{"hide-my-email", "store-session-status", "storage-purchase-prepare", "gift-card"}}
 		s.mu.Unlock()
 		json.NewEncoder(w).Encode(view)
 		return
@@ -203,13 +204,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action.Action {
-	case "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-purchase-prepare-us", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
+	case "gift-prepare", "gift-redeem", "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-purchase-prepare-us", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
 	default:
 		http.Error(w, `{"message":"unknown action"}`, 400)
 		return
 	}
 	timeout := 90 * time.Second
-	if action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+	if action.Action == "gift-prepare" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 		timeout = 3 * time.Minute
 	} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") {
 		timeout = 2 * time.Minute

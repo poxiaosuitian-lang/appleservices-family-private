@@ -145,3 +145,5 @@ main.view-icloud .overview-only:not(.icloud-panel),main.view-icloud #devices,mai
   .icloud-panel .commerce-actions{max-width:none;width:100%;justify-content:flex-start}
   .icloud-panel .commerce-actions .button{width:100%}
 }
+
+.gift-card-flow{margin:18px 0;padding:16px;border:1px solid var(--line,#dce3ed);border-radius:10px}.gift-card-flow h4{margin:0 0 10px}#giftRedeemForm{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:12px}#giftCode{min-width:0;max-width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}

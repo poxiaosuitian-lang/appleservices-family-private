@@ -73,6 +73,7 @@ type Status struct {
 	FailureStage         string    `json:"failure_stage,omitempty"`
 }
 type view struct {
+	GiftCardAvailable            bool                    `json:"gift_card_available"`
 	PurchasePreparationAvailable bool                    `json:"purchase_preparation_available"`
 	StoreSessionReady            *bool                   `json:"store_session_ready,omitempty"`
 	Status                       Status                  `json:"status"`
@@ -440,7 +441,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	request.Header.Set("Content-Type", "application/json")
 	timeout := 95 * time.Second
 	if action, ok := body.(control.Action); ok {
-		if action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+		if action.Action == "gift-prepare" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
 		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") {
 			timeout = 2*time.Minute + 5*time.Second
@@ -817,6 +818,7 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 				result.StoreSessionReady = &live.StoreSessionReady
 			}
 			result.PurchasePreparationAvailable = slices.Contains(live.Capabilities, "storage-purchase-prepare")
+			result.GiftCardAvailable = slices.Contains(live.Capabilities, "gift-card")
 			result.HideMyEmailAvailable = slices.Contains(live.Capabilities, "hide-my-email")
 			result.ControlReady = true
 		}
