@@ -4,114 +4,696 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="app-token" content="__APP_TOKEN__">
-  <title>appleservices · 设备控制台</title>
+  <title>appleservices · 设备与 iCloud 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%232563eb'/%3E%3Cstop offset='100%25' stop-color='%231d4ed8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Cpath d='M32 16c-6.6 0-12 5.4-12 12 0 5.1 3.2 9.5 7.7 11.2L26 48h12l-1.7-8.8C40.8 37.5 44 33.1 44 28c0-6.6-5.4-12-12-12zm0 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
 <aside class="sidebar">
-  <a class="brand" href="#"><span class="brand-icon">a<span></span></span><span>appleservices<small>设备控制台</small></span></a>
+  <a class="brand" href="#overview">
+    <span class="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l7 3.5v5.5c0 4.6-3 8.4-7 9.5-4-1.1-7-4.9-7-9.5V6.5L12 3z"/>
+        <circle cx="12" cy="11.5" r="2.5"/>
+      </svg>
+      <span class="brand-dot"></span>
+    </span>
+    <span class="brand-copy">
+      <strong>appleservices</strong>
+      <small>设备与 iCloud 控制台</small>
+    </span>
+  </a>
+
   <span class="nav-label">工作空间</span>
-  <nav>
-    <a href="#overview" class="nav-item selected"><span class="nav-icon">◫</span>概览<span class="nav-marker"></span></a>
-    <a href="#icloud" class="nav-item nav-icloud" aria-label="iCloud+ 开通与储存" title="iCloud+ 开通与储存"><span class="nav-icon">☁</span>iCloud+</a>
-    <a href="#devices" class="nav-item"><span class="nav-icon">▱</span>我的设备<span class="nav-count" id="navCount">—</span></a>
-    <a href="#requests" class="nav-item"><span class="nav-icon">◇</span>登录请求<span class="request-dot" id="requestDot" hidden></span></a>
+  <nav aria-label="主导航">
+    <a href="#overview" class="nav-item selected">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="2.5" width="6.2" height="6.2" rx="1.6"/>
+          <rect x="11.3" y="2.5" width="6.2" height="6.2" rx="1.6"/>
+          <rect x="2.5" y="11.3" width="6.2" height="6.2" rx="1.6"/>
+          <rect x="11.3" y="11.3" width="6.2" height="6.2" rx="1.6"/>
+        </svg>
+      </span>
+      <span>概览</span>
+      <span class="nav-marker"></span>
+    </a>
+    <a href="#icloud" class="nav-item nav-icloud" aria-label="iCloud+ 开通与储存" title="iCloud+ 开通与储存">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5.8 15.2h8.7a3.3 3.3 0 0 0 .4-6.6 4.6 4.6 0 0 0-8.8-1.2A3.7 3.7 0 0 0 5.8 15.2z"/>
+        </svg>
+      </span>
+      <span>iCloud+</span>
+      <span class="nav-pill">50GB</span>
+    </a>
+    <a href="#devices" class="nav-item">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="14" height="9.5" rx="1.8"/>
+          <path d="M1.8 16h16.4"/>
+        </svg>
+      </span>
+      <span>我的设备</span>
+      <span class="nav-count" id="navCount">—</span>
+    </a>
+    <a href="#requests" class="nav-item">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 2.5l6 2.8v4.7c0 3.9-2.5 7.1-6 8-3.5-.9-6-4.1-6-8V5.3l6-2.8z"/>
+          <path d="M7.6 10.1l1.7 1.7 3.3-3.4"/>
+        </svg>
+      </span>
+      <span>登录请求</span>
+      <span class="request-dot" id="requestDot" hidden></span>
+    </a>
   </nav>
+
   <div class="account-switcher">
-    <div class="account-switcher-head"><span class="nav-label">账号</span><button type="button" id="addAccountButton" title="添加账号">＋</button></div>
+    <div class="account-switcher-head">
+      <span class="nav-label">账号池</span>
+      <button type="button" id="addAccountButton" title="添加账号" aria-label="添加账号">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M8 3.2v9.6M3.2 8h9.6"/>
+        </svg>
+      </button>
+    </div>
     <div id="accountList" class="account-list"></div>
-    <button type="button" class="add-account-item" id="addAccountButtonSecondary"><span>＋</span>添加其他账号</button>
-    <button type="button" class="add-account-item" id="removeAccountButton" title="只从列表移除，设备身份保留在磁盘上"><span>−</span>移除当前账号</button>
+    <div class="account-actions-bar">
+      <button type="button" class="add-account-item" id="addAccountButtonSecondary">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>
+        添加账号
+      </button>
+      <button type="button" class="add-account-item remove-item" id="removeAccountButton" title="只从列表移除，设备身份保留在磁盘上">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3.5 8h9"/></svg>
+        移除当前
+      </button>
+    </div>
   </div>
-  <div class="sidebar-note"><span class="small-orb"></span><strong>只在这台电脑运行</strong><p>关闭面板后，后台仍继续保持登录。</p></div>
-  <div class="sidebar-bottom"><span class="avatar">a</span><span id="sidebarAccount">本机账户<small>Windows 工作空间</small></span></div>
+
+  <div class="sidebar-note">
+    <div class="sidebar-note-title"><span class="small-orb"></span><strong>本机环回守护</strong></div>
+    <p>关闭浏览页面后，后台进程仍继续维持会话与推送在线。</p>
+  </div>
+
+  <div class="sidebar-bottom">
+    <span class="avatar" aria-hidden="true">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="10" cy="7" r="3.2"/>
+        <path d="M4.2 16.5c1.2-2.6 3.3-4 5.8-4s4.6 1.4 5.8 4"/>
+      </svg>
+    </span>
+    <span id="sidebarAccount">本机账户<small>Windows 工作空间</small></span>
+  </div>
 </aside>
+
 <main id="overview">
-  <header class="page-header"><div><div class="eyebrow">你的 Apple 工作空间</div><h1>设备与登录<span class="heading-dot">.</span></h1><p>在一处管理设备身份、登录状态和验证码。</p></div><div class="header-actions"><span class="local-badge"><span></span>本机面板</span><button class="icon-button" id="reloadView" aria-label="刷新状态" title="刷新状态">↻</button></div></header>
+  <header class="page-header">
+    <div>
+      <div class="eyebrow" id="pageEyebrow">你的 Apple 工作空间</div>
+      <h1>设备与登录</h1>
+      <p>在一处管理设备身份、登录状态和验证码。</p>
+    </div>
+    <div class="header-actions">
+      <span class="local-badge" title="仅监听 127.0.0.1 本机环回地址">
+        <span class="local-badge-dot"></span>
+        127.0.0.1 本机面板
+      </span>
+      <button class="icon-button theme-button" type="button" id="themeToggle" aria-label="切换外观主题" title="切换外观主题">
+        <svg class="icon-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="10" r="3.6"/>
+          <path d="M10 2.3v1.9M10 15.8v1.9M2.3 10h1.9M15.8 10h1.9M4.6 4.6l1.3 1.3M14.1 14.1l1.3 1.3M15.4 4.6l-1.3 1.3M5.9 14.1l-1.3 1.3"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15.5 11.8A6.5 6.5 0 0 1 8.2 4.5a6.5 6.5 0 1 0 7.3 7.3z"/>
+        </svg>
+      </button>
+      <button class="icon-button reload-button" type="button" id="reloadView" aria-label="刷新状态" title="刷新状态">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16.2 10a6.2 6.2 0 1 1-1.6-4.2"/>
+          <path d="M16.2 3.6v2.8h-2.8"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
   <div id="notice" class="notice" role="status" hidden></div>
+
   <section class="request-card icloud-only icloud-intro">
-    <div class="card-title-row"><div><span class="card-kicker">订阅与容量</span><h2>开通 iCloud+</h2></div><a class="button button-light" id="icloudLoginLink" href="#overview">前往连接账户</a></div>
-    <p class="card-description">美区 50GB：准备付款方式或账户余额 → 检查容量、报价与购买会话 → 确认订阅 → 核验订阅和付费容量。</p>
-    <p class="card-description" id="icloudAccessHint" role="status">正在读取账户状态…</p>
-    <p class="cache-note">当前支持 50GB 方案，以 Apple 返回并核验的报价为准。确认订阅会产生真实扣款并自动续费。</p>
+    <div class="card-title-row">
+      <div>
+        <span class="card-kicker">订阅与云端容量</span>
+        <h2>开通 iCloud+ 50GB</h2>
+      </div>
+      <a class="button button-light" id="icloudLoginLink" href="#overview">前往连接账户</a>
+    </div>
+    <div class="icloud-steps">
+      <div class="icloud-step"><span class="step-num">1</span><div><strong>准备余额或付款方式</strong><small>同地区礼品卡充值或登记付款方式</small></div></div>
+      <div class="icloud-step"><span class="step-num">2</span><div><strong>核验容量、报价与会话</strong><small>实时核对 Apple 返回的币种与价格</small></div></div>
+      <div class="icloud-step"><span class="step-num">3</span><div><strong>确认订阅并回读配额</strong><small>核验订阅生效与 50GB 付费容量</small></div></div>
+    </div>
+    <p class="status-callout" id="icloudAccessHint" role="status">正在读取账户状态…</p>
+    <p class="cache-note">当前支持已核验的 50GB 方案，以 Apple 实时返回报价为准。确认订阅会产生真实扣款并自动续费。</p>
   </section>
+
   <section class="top-grid overview-only">
-    <article class="session-card">
-      <div class="session-top"><span class="card-kicker">登录状态</span><span class="status-badge" id="statusBadge"><i></i>正在读取</span></div>
-      <div class="session-body"><div><h2 id="sessionTitle">连接你的设备</h2><p id="sessionDescription">正在读取本机后台状态…</p><span class="account-tag" id="accountTag" hidden></span></div><div class="computer-art" aria-hidden="true"><div class="computer-screen"><div class="screen-gradient"></div><span class="screen-mark">a</span></div><div class="computer-base"></div><div class="computer-shadow"></div></div></div>
-      <div class="session-metrics"><div><span class="metric-dot" id="authDot"></span><div><small>账户认证</small><strong id="authState">正在读取</strong></div></div><div><span class="metric-dot" id="pushDot"></span><div><small>验证码推送</small><strong id="pushState">正在读取</strong></div></div><div><span class="metric-dot" id="renewDot"></span><div><small>自动续登录</small><strong id="renewState">每 10 分钟</strong></div></div></div>
-      <div class="session-actions"><button class="button button-light" id="startButton">连接账户<span>↗</span></button><button class="button button-light" id="renewButton" hidden>验证 Apple 账户<span>✓</span></button><button class="quiet-button" id="stopButton" hidden>停止后台</button><span class="session-hint" id="sessionHint">登录身份会在本机保留</span></div>
+    <article class="session-card" id="sessionCard">
+      <div class="session-top">
+        <span class="card-kicker">设备守护状态</span>
+        <span class="status-badge" id="statusBadge"><i></i>正在读取</span>
+      </div>
+      <div class="session-body">
+        <div class="session-copy">
+          <h2 id="sessionTitle">连接你的设备</h2>
+          <p id="sessionDescription">正在读取本机后台状态…</p>
+          <span class="account-tag" id="accountTag" hidden></span>
+        </div>
+        <div class="computer-art" aria-hidden="true">
+          <svg viewBox="0 0 148 112" fill="none">
+            <defs>
+              <linearGradient id="scrBg" x1="18" y1="12" x2="130" y2="78" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#1e3a8a"/>
+                <stop offset="52%" stop-color="#2563eb"/>
+                <stop offset="100%" stop-color="#0ea5e9"/>
+              </linearGradient>
+              <linearGradient id="standGrad" x1="74" y1="80" x2="74" y2="100" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#cbd5e1"/>
+                <stop offset="100%" stop-color="#94a3b8"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="74" cy="103" rx="46" ry="5" fill="#0f172a" opacity="0.08"/>
+            <rect x="20" y="10" width="108" height="70" rx="10" fill="#0f172a"/>
+            <rect x="24" y="14" width="100" height="60" rx="7" fill="url(#scrBg)"/>
+            <circle cx="104" cy="28" r="22" fill="#ffffff" opacity="0.12"/>
+            <circle cx="44" cy="60" r="26" fill="#38bdf8" opacity="0.18"/>
+            <rect x="34" y="25" width="44" height="6" rx="3" fill="#ffffff" opacity="0.85"/>
+            <rect x="34" y="36" width="62" height="4" rx="2" fill="#ffffff" opacity="0.45"/>
+            <rect x="34" y="45" width="36" height="4" rx="2" fill="#ffffff" opacity="0.32"/>
+            <g class="art-shield">
+              <circle cx="104" cy="54" r="11" fill="#ffffff" opacity="0.2"/>
+              <path d="M104 47.5l5 2.2v3.8c0 3.1-2.1 5.7-5 6.5-2.9-.8-5-3.4-5-6.5v-3.8l5-2.2z" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+            </g>
+            <path d="M64 80h20l4 16H60l4-16z" fill="url(#standGrad)"/>
+            <rect x="48" y="96" width="52" height="4" rx="2" fill="#94a3b8"/>
+          </svg>
+        </div>
+      </div>
+      <div class="session-metrics">
+        <div class="metric-tile">
+          <span class="metric-dot" id="authDot"></span>
+          <div><small>账户认证</small><strong id="authState">正在读取</strong></div>
+        </div>
+        <div class="metric-tile">
+          <span class="metric-dot" id="pushDot"></span>
+          <div><small>验证码推送</small><strong id="pushState">正在读取</strong></div>
+        </div>
+        <div class="metric-tile">
+          <span class="metric-dot" id="renewDot"></span>
+          <div><small>自动续登录</small><strong id="renewState">每 10 分钟</strong></div>
+        </div>
+      </div>
+      <div class="session-actions">
+        <button class="button button-primary" type="button" id="startButton">连接账户</button>
+        <button class="button button-light" type="button" id="renewButton" hidden>验证 Apple 账户</button>
+        <button class="quiet-button" type="button" id="stopButton" hidden>停止后台</button>
+        <span class="session-hint" id="sessionHint">登录身份会在本机保留</span>
+      </div>
     </article>
-    <article class="code-card"><div class="card-title-row"><div><span class="card-kicker dark">身份验证</span><h2>本机验证码</h2></div><span class="shield-icon">◇</span></div><p class="card-description">用于你正在进行的 Apple 账户登录。</p><div class="code-display" id="codeDisplay" aria-live="polite">••• <span>•••</span></div><div class="code-detail" id="codeDetail">登录后可生成六位验证码</div><div class="code-actions"><button class="button button-primary" id="codeButton" disabled>显示验证码<span>→</span></button><button class="copy-button" id="copyButton" aria-label="复制验证码" title="复制验证码" disabled>⧉</button></div><div class="code-footer"><span class="lock-icon">▣</span>仅手动显示，不写入运行日志</div></article>
+
+    <article class="code-card">
+      <div class="card-title-row">
+        <div>
+          <span class="card-kicker dark">双重认证保险箱</span>
+          <h2>本机安全验证码</h2>
+        </div>
+        <span class="shield-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="11" width="16" height="10" rx="2.5"/>
+            <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+        </span>
+      </div>
+      <p class="card-description">用于你正在进行的 Apple 账户受信任设备验证。</p>
+      <div class="code-display" id="codeDisplay" aria-live="polite">
+        <span class="otp-digit">•</span><span class="otp-digit">•</span><span class="otp-digit">•</span>
+        <span class="otp-sep"></span>
+        <span class="otp-digit">•</span><span class="otp-digit">•</span><span class="otp-digit">•</span>
+      </div>
+      <div class="code-timer-track" aria-hidden="true">
+        <svg viewBox="0 0 1000 4" preserveAspectRatio="none">
+          <rect id="codeTimerFill" x="0" y="0" width="0" height="4" rx="2"/>
+        </svg>
+      </div>
+      <div class="code-detail" id="codeDetail">登录后可生成六位验证码</div>
+      <div class="code-actions">
+        <button class="button button-primary" type="button" id="codeButton" disabled>显示六位验证码</button>
+        <button class="copy-button" type="button" id="copyButton" aria-label="复制验证码" title="复制验证码" disabled>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="7" y="7" width="9.5" height="9.5" rx="2"/>
+            <path d="M13 7V5.5A2 2 0 0 0 11 3.5H5.5a2 2 0 0 0-2 2V11a2 2 0 0 0 2 2H7"/>
+          </svg>
+        </button>
+      </div>
+      <div class="code-footer">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 1.8l5 2.2v3.9c0 3.2-2.1 5.8-5 6.6-2.9-.8-5-3.4-5-6.6V4l5-2.2z"/>
+        </svg>
+        <span>仅手动解密显示，绝不写入运行日志</span>
+      </div>
+    </article>
   </section>
+
   <div class="notice overview-only" id="capabilityNotice" role="status" hidden></div>
-  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud 储存空间</h3><button class="text-button" id="storageButton" disabled>查询储存空间</button></div><p id="storageSummary" class="card-description">登录后查询当前容量和使用情况。</p><p id="storageCacheNote" class="cache-note">尚无本地状态</p></section>
-  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud+ 开通与方案</h3><div class="commerce-actions"><button class="text-button" id="planButton" disabled>读取可购方案</button><button class="text-button" id="storeAuthButton" disabled>验证购买会话</button><button class="button button-primary" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button></div></div><p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p><p id="purchaseAvailability" class="card-description" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p><p id="planCacheNote" class="cache-note">尚无本地状态</p><p id="storeAuthSummary" class="card-description">购买会话尚未验证 · 临时会话不会持久化</p><p id="purchaseResult" class="card-description" role="status" hidden></p><div class="payment-help">
-    <p class="card-description">付款准备：使用该账号适用的付款方式或 Apple 账户余额。使用礼品卡时，请在官方客户端登录同一个账号，兑换与账号地区一致的礼品卡，并核对余额到账。</p>
-    <p class="card-description">Windows：Apple Music 侧栏姓名 → 兑换；Mac：App Store 侧栏姓名 → 兑换代码。兑换成功后点击下方重新检查，再点击开通并确认订阅。部分购买仍可能要求登记付款方式，以 Apple 实际要求为准。</p>
-    <p class="card-description"><a href="https://support.apple.com/zh-cn/118242" target="_blank" rel="noopener noreferrer">官方礼品卡兑换说明 ↗</a> · <a id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">管理付款方式 ↗</a></p>
-    <div class="gift-card-flow">
-      <h4>礼品卡协议兑换</h4>
-      <p class="card-description">先检查当前账号的兑换会话，再输入用于充值余额的 16 位礼品卡代码。请勿输入订阅优惠码。提交后会消耗兑换码，兑换结果不明时请先核对 Apple 官方余额。</p>
-      <button class="button button-light" id="giftPrepareButton" disabled>检查兑换会话</button>
-      <form id="giftRedeemForm" autocomplete="off">
-        <label for="giftCode">礼品卡兑换码</label>
-        <input id="giftCode" type="password" maxlength="16" autocomplete="off" spellcheck="false" placeholder="先检查兑换会话" disabled>
-        <button class="button button-light" id="giftRedeemButton" disabled>确认兑换</button>
-      </form>
-      <p class="card-description" id="giftResult" role="status">会话检查不验证卡码、不查询余额；兑换码不写入日志或本地存储。</p>
+
+  <section class="verification-banner overview-only" id="smsPanel" hidden>
+    <div>
+      <span class="card-kicker dark">首次登录验证</span>
+      <h3>输入手机号收到的短信验证码</h3>
+      <p>验证码已发送到账户绑定的手机号。</p>
     </div>
-    <button class="button button-light" id="paymentCheckButton" disabled>付款准备完成，重新检查</button>
-    <p class="cache-note">重新检查只查询容量、报价和订阅并验证购买会话，不会扣款。面板不读取账户余额、不收集兑换码；遇到购买结果不明时，先查询容量和官方订阅记录。</p>
-  </div><div id="planList" class="plan-list"></div></section>
+    <form id="smsForm">
+      <input id="smsCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="六位短信验证码" aria-label="六位短信验证码" required>
+      <button class="button button-primary" type="submit">验证并登录</button>
+      <button class="quiet-button dark-text" type="button" id="resendButton">重发短信</button>
+    </form>
+  </section>
+
+  <section class="request-card overview-only activation-card" id="activationCard" hidden>
+    <div class="card-title-row">
+      <div>
+        <span class="card-kicker">iCloud 激活引导</span>
+        <h3>完成条款与 Mac NAC 验收</h3>
+      </div>
+      <span class="subtle-tag" id="activationState">待检查</span>
+    </div>
+    <p id="activationSummary" class="card-description">账号验证码会话已保存；检查 Apple 当前条款后可在此继续激活。</p>
+    <p id="activationVersions" class="cache-note" hidden></p>
+    <div class="commerce-actions">
+      <a class="text-button" id="activationICloudTerms" target="_blank" rel="noopener" hidden>查看 iCloud 条款 ↗</a>
+      <a class="text-button" id="activationMediaTerms" target="_blank" rel="noopener" hidden>查看媒体服务条款 ↗</a>
+      <button class="button button-light" type="button" id="activationCheckButton">检查激活状态</button>
+      <button class="button button-primary" type="button" id="activationAcceptButton" hidden>同意条款并继续激活</button>
+    </div>
+  </section>
+
+  <section class="verification-banner overview-only" id="pairingPanel" hidden>
+    <div>
+      <span class="card-kicker dark">设备配对验证</span>
+      <h3>输入受信任设备显示的配对码</h3>
+      <p>项目通过 APS 和 GSA 完成证明交换，不启动官方客户端。</p>
+    </div>
+    <form id="pairingForm">
+      <input id="pairingCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="六位配对码" aria-label="六位配对码" required>
+      <button class="button button-primary" type="submit">发送配对证明</button>
+    </form>
+  </section>
+
+  <section class="request-card overview-only icloud-panel storage-card">
+    <div class="card-title-row">
+      <div class="title-with-badge">
+        <span class="section-icon blue" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5.8 15.2h8.7a3.3 3.3 0 0 0 .4-6.6 4.6 4.6 0 0 0-8.8-1.2A3.7 3.7 0 0 0 5.8 15.2z"/>
+          </svg>
+        </span>
+        <div>
+          <h3>iCloud 储存空间</h3>
+          <p id="storageCacheNote" class="cache-note">尚无本地状态</p>
+        </div>
+      </div>
+      <button class="button button-light button-sm" type="button" id="storageButton" disabled>查询储存空间</button>
+    </div>
+    <p id="storageSummary" class="card-description storage-headline">登录后查询当前容量和使用情况。</p>
+    <div class="storage-meter" id="storageVisual" hidden>
+      <div class="storage-bar-track" aria-hidden="true">
+        <svg viewBox="0 0 1000 12" preserveAspectRatio="none">
+          <rect id="storageBarFill" x="0" y="0" width="0" height="12" rx="6"/>
+        </svg>
+      </div>
+      <div class="storage-stats">
+        <div class="storage-stat"><small>已用空间</small><strong id="storageUsedStat">—</strong></div>
+        <div class="storage-stat"><small>可用空间</small><strong id="storageAvailStat">—</strong></div>
+        <div class="storage-stat"><small>总计配额</small><strong id="storageTotalStat">—</strong></div>
+        <div class="storage-stat"><small>使用占比</small><strong id="storagePercentStat">—</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="request-card overview-only icloud-panel commerce-card">
+    <div class="card-title-row">
+      <div class="title-with-badge">
+        <span class="section-icon indigo" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 2.5l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 7.7l5-.7L10 2.5z"/>
+          </svg>
+        </span>
+        <div>
+          <h3>iCloud+ 开通与方案</h3>
+          <p id="planCacheNote" class="cache-note">尚无本地状态</p>
+        </div>
+      </div>
+      <div class="commerce-actions">
+        <button class="button button-light button-sm" type="button" id="planButton" disabled>读取可购方案</button>
+        <button class="button button-light button-sm" type="button" id="storeAuthButton" disabled>验证购买会话</button>
+        <button class="button button-primary" type="button" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button>
+      </div>
+    </div>
+
+    <div class="commerce-status-grid">
+      <div class="commerce-status-box">
+        <small>资格与报价核验</small>
+        <p id="purchaseAvailability" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p>
+      </div>
+      <div class="commerce-status-box">
+        <small>购买会话状态</small>
+        <p id="storeAuthSummary">购买会话尚未验证 · 临时会话不会持久化</p>
+      </div>
+    </div>
+
+    <p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p>
+    <p id="purchaseResult" class="purchase-result-banner" role="status" hidden></p>
+    <div id="planList" class="plan-list"></div>
+
+    <div class="payment-help">
+      <div class="payment-guide-box">
+        <div class="subpanel-head">
+          <h4>付款方式与余额准备</h4>
+          <span class="subtle-tag">扣款前预检</span>
+        </div>
+        <p class="card-description">使用该账号适用的付款方式或 Apple 账户余额。使用礼品卡时，请在官方客户端登录同一个账号，兑换与账号地区一致的礼品卡，并核对余额到账。</p>
+        <p class="card-description">Windows：Apple Music 侧栏姓名 → 兑换；Mac：App Store 侧栏姓名 → 兑换代码。兑换成功后点击下方重新检查，再点击开通并确认订阅。</p>
+        <div class="external-links">
+          <a class="link-chip" href="https://support.apple.com/zh-cn/118242" target="_blank" rel="noopener noreferrer">官方礼品卡兑换说明 ↗</a>
+          <a class="link-chip" id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">管理付款方式 ↗</a>
+        </div>
+        <div class="payment-check-bar">
+          <button class="button button-light" type="button" id="paymentCheckButton" disabled>付款准备完成，重新检查</button>
+          <p class="cache-note">重新检查只查询容量、报价和订阅并验证购买会话，不会扣款。购买结果不明时请先查询容量和官方订阅记录。</p>
+        </div>
+      </div>
+
+      <div class="gift-card-flow">
+        <div class="subpanel-head">
+          <h4>礼品卡协议直兑</h4>
+          <span class="subtle-tag">16 位充值卡</span>
+        </div>
+        <p class="card-description">先检查当前账号的兑换会话，再输入用于充值余额的 16 位礼品卡代码（请勿输入订阅优惠码）。提交后会消耗兑换码。</p>
+        <div class="gift-step-actions">
+          <button class="button button-light button-sm" type="button" id="giftPrepareButton" disabled>1. 检查兑换会话</button>
+        </div>
+        <form id="giftRedeemForm" autocomplete="off">
+          <label for="giftCode" class="sr-only">礼品卡兑换码</label>
+          <input id="giftCode" type="password" maxlength="16" autocomplete="off" spellcheck="false" placeholder="先检查兑换会话" disabled>
+          <button class="button button-primary" type="submit" id="giftRedeemButton" disabled>2. 确认兑换</button>
+        </form>
+        <p class="cache-note" id="giftResult" role="status">会话检查不验证卡码、不查询余额；兑换码不写入日志或本地存储。</p>
+      </div>
+    </div>
+  </section>
+
   <section class="request-card overview-only family-card" id="familyCard">
-    <div class="card-title-row"><div><h3>家庭共享</h3><p class="card-description">查看成员资格，并把当前账号加入池内母号的共享 iCloud+。</p></div><div class="family-head-actions"><span id="familyCacheNote">尚无本地状态</span><button class="text-button" id="familyRefreshButton" disabled>读取 Apple 状态</button></div></div>
-    <div class="family-status" id="familyStatus"><span class="family-state-dot"></span><div class="family-status-copy"><strong id="familySummary">尚未读取家庭状态</strong><p id="familyDetail">操作前会实时核对成员、组织者和共享储存状态。</p></div><span class="family-status-chip" id="familyStatusChip">待读取</span></div>
-    <div class="family-map" id="familyMap" hidden>
-      <div class="family-node family-node-organizer"><span class="family-crown">★</span><div><small>家庭母号</small><strong id="familyOrganizerName">—</strong></div></div>
-      <div class="family-link"><span></span><small>共享 iCloud+</small><b>→</b></div>
-      <div class="family-node family-node-current"><span class="family-avatar" id="familyCurrentAvatar">A</span><div><small>当前账号</small><strong id="familyCurrentName">—</strong></div></div>
+    <div class="card-title-row">
+      <div class="title-with-badge">
+        <span class="section-icon gold" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="7.2" cy="7.2" r="2.5"/>
+            <circle cx="13.4" cy="7.8" r="2.1"/>
+            <path d="M2.8 15.8c.9-2.2 2.5-3.4 4.4-3.4s3.5 1.2 4.4 3.4"/>
+            <path d="M11.6 15.8c.6-1.6 1.8-2.6 3.3-2.6 1.1 0 2 .5 2.6 1.5"/>
+          </svg>
+        </span>
+        <div>
+          <h3>家庭共享</h3>
+          <p class="card-description">查看成员资格，并把当前账号加入池内母号的共享 iCloud+。</p>
+        </div>
+      </div>
+      <div class="family-head-actions">
+        <span id="familyCacheNote">尚无本地状态</span>
+        <button class="button button-light button-sm" type="button" id="familyRefreshButton" disabled>读取 Apple 状态</button>
+      </div>
     </div>
+
+    <div class="family-status" id="familyStatus">
+      <span class="family-state-dot"></span>
+      <div class="family-status-copy">
+        <strong id="familySummary">尚未读取家庭状态</strong>
+        <p id="familyDetail">操作前会实时核对成员、组织者和共享储存状态。</p>
+      </div>
+      <span class="family-status-chip" id="familyStatusChip">待读取</span>
+    </div>
+
+    <div class="family-map" id="familyMap" hidden>
+      <div class="family-node family-node-organizer">
+        <span class="family-crown" aria-hidden="true">★</span>
+        <div><small>家庭母号（组织者）</small><strong id="familyOrganizerName">—</strong></div>
+      </div>
+      <div class="family-link">
+        <span></span>
+        <small>共享 iCloud+</small>
+        <b>→</b>
+      </div>
+      <div class="family-node family-node-current">
+        <span class="family-avatar" id="familyCurrentAvatar">A</span>
+        <div><small>当前工作区账号</small><strong id="familyCurrentName">—</strong></div>
+      </div>
+    </div>
+
     <div class="family-metrics" id="familyMetrics" hidden>
       <div><small>家庭成员</small><strong id="familyMemberCount">—</strong></div>
       <div><small>当前角色</small><strong id="familyRole">—</strong></div>
       <div><small>共享储存</small><strong id="familyStorageState">—</strong></div>
       <div><small>共享容量</small><strong id="familyStorageBytes">—</strong></div>
     </div>
+
     <div class="family-controls" id="familyControls" hidden>
-      <label for="familyOrganizer">池内母号</label>
+      <label for="familyOrganizer">选择池内母号</label>
       <select id="familyOrganizer" aria-label="池内母号"></select>
-      <button class="button button-primary" id="familyAddButton" disabled>加入家庭并使用共享空间</button>
-      <button class="button button-light" id="familyJoinStorageButton" disabled>仅加入共享储存</button>
+      <button class="button button-primary" type="button" id="familyAddButton" disabled>加入家庭并使用共享空间</button>
+      <button class="button button-light" type="button" id="familyJoinStorageButton" disabled>仅加入共享储存</button>
     </div>
+
     <div class="family-remove-controls" id="familyRemoveControls" hidden>
-      <div><strong>成员管理</strong><small>从当前家庭移出一个池内普通成员</small></div>
+      <div><strong>家庭成员管理</strong><small>从当前家庭安全移出一个池内普通成员</small></div>
       <select id="familyRemoveMember" aria-label="要移出的家庭成员"></select>
-      <button class="button button-danger" id="familyRemoveButton" disabled>移出家庭</button>
+      <button class="button button-danger" type="button" id="familyRemoveButton" disabled>移出家庭</button>
     </div>
+
     <p class="family-safety" id="familySafety">购买共享和位置共享不会开启；验证码仅在 Apple 挑战出现后由当前账号自己的本地 Mac 身份生成。</p>
   </section>
+
   <section class="request-card overview-only hme-card" id="hmeCard" hidden>
-    <div class="card-title-row"><div><span class="card-kicker">iCloud+ 子号工具</span><h3>隐藏邮件地址</h3></div><div class="commerce-actions"><button class="text-button" id="hmeListButton">读取地址</button><button class="text-button hme-create-button" id="hmeGenerateButton">＋ 生成候选</button></div></div>
-    <div class="hme-summary"><div><strong id="hmeActiveCount">—</strong><small>使用中</small></div><div><strong id="hmeInactiveCount">—</strong><small>已停用</small></div><p id="hmeSummary">读取后可按标签、备注或邮箱搜索。</p></div>
-    <div class="hme-forward-settings" id="hmeForwardSettings" hidden><div><small>所有隐私邮箱统一转发到</small><strong id="hmeForwardCurrent">—</strong><p id="hmeForwardHint">Apple 只允许选择已关联并验证的账户邮箱。</p></div><select id="hmeForwardSelect" aria-label="默认转发邮箱"></select><button class="button button-light" id="hmeForwardButton" disabled>保存转发目标</button><a class="text-button" href="https://account.apple.com/account/manage/section/signin-and-security" target="_blank" rel="noopener">管理账户邮箱 ↗</a></div>
-    <div class="hme-reachable" id="hmeReachablePanel" hidden><div><small>协议添加可联系邮箱</small><strong>添加并验证后自动切换全部隐私邮箱</strong></div><input id="hmeReachableEmail" type="email" maxlength="254" autocomplete="off" placeholder="目标转发邮箱" aria-label="要添加的账户邮箱"><button class="button button-light" id="hmeReachableStartButton" disabled>发送邮箱验证码</button><form id="hmeReachableCodeForm" hidden><input id="hmeReachableCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,8}" maxlength="8" placeholder="邮箱验证码" aria-label="目标邮箱验证码" required><button class="button button-primary" type="submit">验证并切换</button></form></div>
-    <div class="hme-candidate" id="hmeCandidatePanel" hidden><div><small>Apple 候选地址</small><strong id="hmeCandidateAddress">—</strong></div><input id="hmeCreateLabel" maxlength="128" placeholder="标签" aria-label="新地址标签"><input id="hmeCreateNote" maxlength="1024" placeholder="备忘录（可选）" aria-label="新地址备忘录"><button class="button button-primary" id="hmeReserveButton">确认创建</button><button class="icon-button" id="hmeCancelCandidate" title="取消候选" aria-label="取消候选">×</button></div>
-    <div class="hme-toolbar"><input id="hmeSearch" type="search" placeholder="搜索邮箱、标签或备忘录" aria-label="搜索隐藏邮件地址"><div class="hme-segments" role="group" aria-label="邮箱状态"><button class="active" data-hme-filter="active">使用中</button><button data-hme-filter="inactive">已停用</button><button data-hme-filter="all">全部</button></div></div>
+    <div class="card-title-row">
+      <div class="title-with-badge">
+        <span class="section-icon teal" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="4.5" width="15" height="11" rx="2.2"/>
+            <path d="M3.2 5.5L10 10.6l6.8-5.1"/>
+          </svg>
+        </span>
+        <div>
+          <span class="card-kicker">iCloud+ 子号隐私工具</span>
+          <h3>隐藏邮件地址</h3>
+        </div>
+      </div>
+      <div class="commerce-actions">
+        <button class="button button-light button-sm" type="button" id="hmeListButton">读取地址</button>
+        <button class="button button-primary button-sm hme-create-button" type="button" id="hmeGenerateButton">＋ 生成候选</button>
+      </div>
+    </div>
+
+    <div class="hme-summary">
+      <div class="hme-stat-box"><strong id="hmeActiveCount">—</strong><small>使用中</small></div>
+      <div class="hme-stat-box muted-stat"><strong id="hmeInactiveCount">—</strong><small>已停用</small></div>
+      <p id="hmeSummary">读取后可按标签、备注或邮箱搜索。</p>
+    </div>
+
+    <div class="hme-forward-settings" id="hmeForwardSettings" hidden>
+      <div>
+        <small>所有隐私邮箱统一转发到</small>
+        <strong id="hmeForwardCurrent">—</strong>
+        <p id="hmeForwardHint">Apple 只允许选择已关联并验证的账户邮箱。</p>
+      </div>
+      <select id="hmeForwardSelect" aria-label="默认转发邮箱"></select>
+      <button class="button button-light" type="button" id="hmeForwardButton" disabled>保存转发目标</button>
+      <a class="text-button" href="https://account.apple.com/account/manage/section/signin-and-security" target="_blank" rel="noopener">管理账户邮箱 ↗</a>
+    </div>
+
+    <div class="hme-reachable" id="hmeReachablePanel" hidden>
+      <div>
+        <small>协议添加可联系邮箱</small>
+        <strong>添加并验证后自动切换全部隐私邮箱</strong>
+      </div>
+      <input id="hmeReachableEmail" type="email" maxlength="254" autocomplete="off" placeholder="输入目标转发邮箱" aria-label="要添加的账户邮箱">
+      <button class="button button-light" type="button" id="hmeReachableStartButton" disabled>发送邮箱验证码</button>
+      <form id="hmeReachableCodeForm" hidden>
+        <input id="hmeReachableCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,8}" maxlength="8" placeholder="邮箱验证码" aria-label="目标邮箱验证码" required>
+        <button class="button button-primary" type="submit">验证并切换</button>
+      </form>
+    </div>
+
+    <div class="hme-candidate" id="hmeCandidatePanel" hidden>
+      <div><small>Apple 候选地址</small><strong id="hmeCandidateAddress">—</strong></div>
+      <input id="hmeCreateLabel" maxlength="128" placeholder="设置标签（必填）" aria-label="新地址标签">
+      <input id="hmeCreateNote" maxlength="1024" placeholder="备忘录（可选）" aria-label="新地址备忘录">
+      <button class="button button-primary" type="button" id="hmeReserveButton">确认创建</button>
+      <button class="icon-button" type="button" id="hmeCancelCandidate" title="取消候选" aria-label="取消候选">×</button>
+    </div>
+
+    <div class="hme-toolbar">
+      <div class="search-input-wrap">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="5"/>
+          <path d="M12 12l3.5 3.5"/>
+        </svg>
+        <input id="hmeSearch" type="search" placeholder="搜索邮箱、标签或备忘录…" aria-label="搜索隐藏邮件地址">
+      </div>
+      <div class="hme-segments" role="group" aria-label="邮箱状态">
+        <button type="button" class="active" data-hme-filter="active">使用中</button>
+        <button type="button" data-hme-filter="inactive">已停用</button>
+        <button type="button" data-hme-filter="all">全部</button>
+      </div>
+    </div>
+
     <div class="hme-list" id="hmeList"><div class="hme-empty">尚未读取当前子号的地址</div></div>
-    <button class="text-button hme-more" id="hmeMoreButton" hidden>显示更多</button>
+    <button class="button button-light button-sm hme-more" type="button" id="hmeMoreButton" hidden>显示更多</button>
   </section>
 
-  <section class="verification-banner overview-only" id="smsPanel" hidden><div><span class="card-kicker dark">首次登录验证</span><h3>输入手机号收到的短信验证码</h3><p>验证码已发送到账户绑定的手机号。</p></div><form id="smsForm"><input id="smsCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="六位短信验证码" aria-label="六位短信验证码" required><button class="button button-primary" type="submit">验证并登录</button><button class="quiet-button dark-text" type="button" id="resendButton">重发短信</button></form></section>
-  <section class="request-card overview-only" id="activationCard" hidden><div class="card-title-row"><div><span class="card-kicker">iCloud 激活</span><h3>完成条款与 Mac NAC 验收</h3></div><span class="subtle-tag" id="activationState">待检查</span></div><p id="activationSummary" class="card-description">账号验证码会话已保存；检查 Apple 当前条款后可在此继续激活。</p><p id="activationVersions" class="cache-note" hidden></p><div class="commerce-actions"><a class="text-button" id="activationICloudTerms" target="_blank" rel="noopener" hidden>查看 iCloud 条款 ↗</a><a class="text-button" id="activationMediaTerms" target="_blank" rel="noopener" hidden>查看媒体服务条款 ↗</a><button class="text-button" id="activationCheckButton">检查激活状态</button><button class="button button-primary" id="activationAcceptButton" hidden>同意条款并继续激活</button></div></section>
-  <section class="verification-banner overview-only" id="pairingPanel" hidden><div><span class="card-kicker dark">设备配对验证</span><h3>输入受信任设备显示的配对码</h3><p>项目通过 APS 和 GSA 完成证明交换，不启动官方客户端。</p></div><form id="pairingForm"><input id="pairingCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="六位配对码" aria-label="六位配对码" required><button class="button button-primary" type="submit">发送配对证明</button></form></section>
-  <section id="devices" class="devices-section"><div class="section-heading"><div><span class="section-kicker">已关联的设备</span><h2>我的设备 <span id="deviceCount">—</span></h2></div><button class="text-button" id="devicesButton" disabled>↻<span>刷新设备</span></button></div><div class="device-grid" id="deviceGrid"><div class="empty-state">正在读取设备列表…</div></div><div class="section-footnote"><span class="footnote-dot"></span><span id="deviceUpdate">设备列表与 Apple 账户同步</span></div></section>
-  <section class="lower-grid"><article class="request-card" id="requests"><div class="card-title-row"><h3>登录请求</h3><span class="subtle-tag" id="requestTag">等待请求</span></div><div class="request-content" id="requestContent"><span class="request-symbol">✓</span><div><strong id="requestTitle">没有待处理的登录请求</strong><p id="requestText">收到新的请求时，它会出现在这里。</p></div></div><div class="request-actions" id="requestActions" hidden><button class="button button-primary" id="allowButton">允许并显示验证码</button><button class="button button-outline" id="denyButton">拒绝</button></div></article><article class="activity-card overview-activity"><div class="card-title-row"><h3>最近动态</h3><span class="subtle-label">本次打开</span></div><div id="activityList" class="activity-list"><p class="empty-activity">状态变化会显示在这里</p></div></article></section>
-  <footer class="page-footer"><span>appleservices <span class="footer-separator">/</span> 本机设备控制台</span><span id="lastUpdated">正在连接后台</span></footer>
+  <section id="devices" class="devices-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-kicker">已关联硬件与虚拟身份</span>
+        <h2>我的设备 <span id="deviceCount">—</span></h2>
+      </div>
+      <button class="button button-light button-sm" type="button" id="devicesButton" disabled>刷新设备列表</button>
+    </div>
+    <div class="device-grid" id="deviceGrid">
+      <div class="empty-state">正在读取设备列表…</div>
+    </div>
+    <div class="section-footnote">
+      <span class="footnote-dot"></span>
+      <span id="deviceUpdate">设备列表与 Apple 账户同步</span>
+    </div>
+  </section>
+
+  <section class="lower-grid">
+    <article class="request-card" id="requests">
+      <div class="card-title-row">
+        <div class="title-with-badge">
+          <span class="section-icon emerald" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 2.5l6 2.8v4.7c0 3.9-2.5 7.1-6 8-3.5-.9-6-4.1-6-8V5.3l6-2.8z"/>
+              <path d="M7.6 10.1l1.7 1.7 3.3-3.4"/>
+            </svg>
+          </span>
+          <h3>登录请求审批</h3>
+        </div>
+        <span class="subtle-tag" id="requestTag">等待请求</span>
+      </div>
+      <div class="request-content" id="requestContent">
+        <span class="request-symbol" aria-hidden="true">✓</span>
+        <div>
+          <strong id="requestTitle">没有待处理的登录请求</strong>
+          <p id="requestText">收到新的请求时，它会第一时间出现在这里。</p>
+        </div>
+      </div>
+      <div class="request-actions" id="requestActions" hidden>
+        <button class="button button-primary" type="button" id="allowButton">允许并显示验证码</button>
+        <button class="button button-outline" type="button" id="denyButton">拒绝请求</button>
+      </div>
+    </article>
+
+    <article class="activity-card overview-activity">
+      <div class="card-title-row">
+        <div class="title-with-badge">
+          <span class="section-icon slate" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="10" cy="10" r="7"/>
+              <path d="M10 6.2V10l2.6 1.6"/>
+            </svg>
+          </span>
+          <h3>最近动态</h3>
+        </div>
+        <span class="subtle-label">本次会话实时记录</span>
+      </div>
+      <div id="activityList" class="activity-list">
+        <p class="empty-activity">状态变化会实时记录在这里</p>
+      </div>
+    </article>
+  </section>
+
+  <footer class="page-footer">
+    <span><strong>appleservices</strong> <span class="footer-separator">/</span> 本机设备与 iCloud 控制台</span>
+    <span id="lastUpdated" class="footer-status">正在连接后台</span>
+  </footer>
 </main>
-<dialog id="loginDialog"><form id="loginForm" class="dialog-form"><div class="dialog-top"><span class="dialog-icon">a</span><button class="dialog-close" type="button" id="closeLogin" aria-label="关闭">×</button></div><div class="eyebrow">恢复你的工作空间</div><h2>连接 Apple 账户</h2><p>沿用这台电脑已有的设备身份。密码仅用于本次登录。</p><label for="appleID">Apple 账户</label><input id="appleID" name="apple_id" type="email" autocomplete="username" placeholder="你的账户邮箱" required><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="off" placeholder="输入账户密码" required><label for="twofactor">首次验证方式</label><select id="twofactor" name="twofactor"><option value="trusted-device">受信任设备验证码（推荐）</option><option value="sms">发送新的短信验证码</option><option value="sms-existing">使用已有短信码（不重新发送）</option><option value="circle">受信任设备配对</option></select><button class="button button-primary dialog-submit" type="submit">登录并保持在线<span>→</span></button><div class="dialog-note">配对方式只走项目协议，不启动官方 iCloud 窗口。</div></form></dialog>
-<dialog id="stopDialog"><div class="dialog-form"><div class="eyebrow">后台连接</div><h2>停止保持登录？</h2><p>暂停推送接收和自动续登录。已保存的设备身份与 Cookie 会保留。</p><div class="dialog-actions"><button class="button button-outline" id="cancelStop">继续在线</button><button class="button button-danger" id="confirmStop">停止后台</button></div></div></dialog>
-<dialog id="hmeEditDialog"><form id="hmeEditForm" class="dialog-form"><div class="dialog-top"><span class="dialog-icon">@</span><button class="dialog-close" type="button" id="closeHMEEdit" aria-label="关闭">×</button></div><div class="eyebrow">隐藏邮件地址</div><h2>编辑地址信息</h2><p id="hmeEditAddress">—</p><label for="hmeEditLabel">标签</label><input id="hmeEditLabel" maxlength="128" required><label for="hmeEditNote">备忘录</label><input id="hmeEditNote" maxlength="1024"><button class="button button-primary dialog-submit" type="submit">存储更改</button></form></dialog>
+
+<dialog id="loginDialog">
+  <form id="loginForm" class="dialog-form">
+    <div class="dialog-top">
+      <span class="dialog-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 3.5v5.5c0 4.6-3 8.4-7 9.5-4-1.1-7-4.9-7-9.5V6.5L12 3z"/>
+          <circle cx="12" cy="11.5" r="2.5"/>
+        </svg>
+      </span>
+      <button class="dialog-close" type="button" id="closeLogin" aria-label="关闭">×</button>
+    </div>
+    <div class="eyebrow">恢复或注册工作空间</div>
+    <h2>连接 Apple 账户</h2>
+    <p>沿用或隔离初始化这台电脑专属的设备身份。密码仅用于本次安全认证，不落盘明文存储。</p>
+    <label for="appleID">Apple 账户邮箱</label>
+    <input id="appleID" name="apple_id" type="email" autocomplete="username" placeholder="name@example.com" required>
+    <label for="password">账户密码</label>
+    <input id="password" name="password" type="password" autocomplete="off" placeholder="输入 Apple 账户密码" required>
+    <label for="twofactor">首次双重验证方式</label>
+    <select id="twofactor" name="twofactor">
+      <option value="trusted-device">受信任设备验证码（推荐）</option>
+      <option value="sms">发送新的短信验证码</option>
+      <option value="sms-existing">使用已有短信码（不重新发送）</option>
+      <option value="circle">受信任设备配对</option>
+    </select>
+    <button class="button button-primary dialog-submit" type="submit">登录并保持后台在线</button>
+    <div class="dialog-note">设备配对与验证均通过原生协议完成，不唤起官方 iCloud 客户端窗口。</div>
+  </form>
+</dialog>
+
+<dialog id="stopDialog">
+  <div class="dialog-form">
+    <div class="dialog-top">
+      <span class="dialog-icon danger" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <rect x="9" y="9" width="6" height="6" rx="1"/>
+        </svg>
+      </span>
+      <div></div>
+    </div>
+    <div class="eyebrow">后台守护控制</div>
+    <h2>停止保持登录？</h2>
+    <p>停止后将暂停推送接收和每 10 分钟自动续期。本机已保存的设备身份与会话凭据仍安全保留。</p>
+    <div class="dialog-actions">
+      <button class="button button-outline" type="button" id="cancelStop">继续保持在线</button>
+      <button class="button button-danger" type="button" id="confirmStop">确认停止后台</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="hmeEditDialog">
+  <form id="hmeEditForm" class="dialog-form">
+    <div class="dialog-top">
+      <span class="dialog-icon teal" aria-hidden="true">@</span>
+      <button class="dialog-close" type="button" id="closeHMEEdit" aria-label="关闭">×</button>
+    </div>
+    <div class="eyebrow">隐藏邮件地址</div>
+    <h2>编辑隐私邮箱信息</h2>
+    <p id="hmeEditAddress" class="mono-pill">—</p>
+    <label for="hmeEditLabel">显示标签</label>
+    <input id="hmeEditLabel" maxlength="128" placeholder="例如：购物网站 / 订阅通知" required>
+    <label for="hmeEditNote">备忘录</label>
+    <input id="hmeEditNote" maxlength="1024" placeholder="添加用途说明（可选）">
+    <button class="button button-primary dialog-submit" type="submit">保存更改</button>
+  </form>
+</dialog>
 </body>
 </html>
