@@ -32,7 +32,7 @@
   <div id="notice" class="notice" role="status" hidden></div>
   <section class="request-card icloud-only icloud-intro">
     <div class="card-title-row"><div><span class="card-kicker">订阅与容量</span><h2>开通 iCloud+</h2></div><a class="button button-light" id="icloudLoginLink" href="#overview">前往连接账户</a></div>
-    <p class="card-description">美区 50GB：点击开通 → 自动检查容量、报价与购买会话 → 由你确认订阅 → 核验付费容量。</p>
+    <p class="card-description">美区 50GB：准备付款方式或账户余额 → 检查容量、报价与购买会话 → 确认订阅 → 核验订阅和付费容量。</p>
     <p class="card-description" id="icloudAccessHint" role="status">正在读取账户状态…</p>
     <p class="cache-note">当前支持 50GB 方案，以 Apple 返回并核验的报价为准。确认订阅会产生真实扣款并自动续费。</p>
   </section>
@@ -47,7 +47,13 @@
   </section>
   <div class="notice overview-only" id="capabilityNotice" role="status" hidden></div>
   <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud 储存空间</h3><button class="text-button" id="storageButton" disabled>查询储存空间</button></div><p id="storageSummary" class="card-description">登录后查询当前容量和使用情况。</p><p id="storageCacheNote" class="cache-note">尚无本地状态</p></section>
-  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud+ 开通与方案</h3><div class="commerce-actions"><button class="text-button" id="planButton" disabled>读取可购方案</button><button class="text-button" id="storeAuthButton" disabled>验证购买会话</button><button class="button button-primary" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button></div></div><p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p><p id="purchaseAvailability" class="card-description" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p><p id="planCacheNote" class="cache-note">尚无本地状态</p><p id="storeAuthSummary" class="card-description">购买会话尚未验证 · 临时会话不会持久化</p><p id="purchaseResult" class="card-description" role="status" hidden></p><div class="payment-help"><p class="card-description">付款准备：如果账户还没有可用付款方式，请先在 Apple 官方页面添加。付款方式须适用于该账号所在地区；完成后回到面板核对容量和方案，再由你确认订阅。</p><p class="card-description"><a id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">前往 Apple 账户管理付款方式 ↗</a> · <a href="https://support.apple.com/zh-cn/118429" target="_blank" rel="noopener noreferrer">查看官方添加付款方式说明 ↗</a></p></div><div id="planList" class="plan-list"></div></section>
+  <section class="request-card overview-only icloud-panel"><div class="card-title-row"><h3>iCloud+ 开通与方案</h3><div class="commerce-actions"><button class="text-button" id="planButton" disabled>读取可购方案</button><button class="text-button" id="storeAuthButton" disabled>验证购买会话</button><button class="button button-primary" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button></div></div><p id="planSummary" class="card-description">先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。</p><p id="purchaseAvailability" class="card-description" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p><p id="planCacheNote" class="cache-note">尚无本地状态</p><p id="storeAuthSummary" class="card-description">购买会话尚未验证 · 临时会话不会持久化</p><p id="purchaseResult" class="card-description" role="status" hidden></p><div class="payment-help">
+    <p class="card-description">付款准备：使用该账号适用的付款方式或 Apple 账户余额。使用礼品卡时，请在官方客户端登录同一个账号，兑换与账号地区一致的礼品卡，并核对余额到账。</p>
+    <p class="card-description">Windows：Apple Music 侧栏姓名 → 兑换；Mac：App Store 侧栏姓名 → 兑换代码。兑换成功后点击下方重新检查，再点击开通并确认订阅。部分购买仍可能要求登记付款方式，以 Apple 实际要求为准。</p>
+    <p class="card-description"><a href="https://support.apple.com/zh-cn/118242" target="_blank" rel="noopener noreferrer">官方礼品卡兑换说明 ↗</a> · <a id="paymentSettingsLink" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">管理付款方式 ↗</a></p>
+    <button class="button button-light" id="paymentCheckButton" disabled>付款准备完成，重新检查</button>
+    <p class="cache-note">重新检查只查询容量、报价和订阅并验证购买会话，不会扣款。面板不读取账户余额、不收集兑换码；遇到购买结果不明时，先查询容量和官方订阅记录。</p>
+  </div><div id="planList" class="plan-list"></div></section>
   <section class="request-card overview-only family-card" id="familyCard">
     <div class="card-title-row"><div><h3>家庭共享</h3><p class="card-description">查看成员资格，并把当前账号加入池内母号的共享 iCloud+。</p></div><div class="family-head-actions"><span id="familyCacheNote">尚无本地状态</span><button class="text-button" id="familyRefreshButton" disabled>读取 Apple 状态</button></div></div>
     <div class="family-status" id="familyStatus"><span class="family-state-dot"></span><div class="family-status-copy"><strong id="familySummary">尚未读取家庭状态</strong><p id="familyDetail">操作前会实时核对成员、组织者和共享储存状态。</p></div><span class="family-status-chip" id="familyStatusChip">待读取</span></div>

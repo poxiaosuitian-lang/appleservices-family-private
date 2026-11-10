@@ -83,6 +83,7 @@ function scheduleAutoRefresh(view,activated){
   if(target.kind==='plan')renderPlans(view.storage_plan,{checkedAt:view.storage_plan_checked_at,stale:true});
   window.setTimeout(()=>{autoRefreshScheduled=false;if(account!==selectedAccount||busy){autoRefreshState.delete(key);clearAutoRefreshAttempt(key);releaseAutoRefreshLease(account);return;}renewAutoRefreshLease(account);action(target.action,{}, {silent:true,automatic:true,autoKey:key});},80);
 }
+function hasPaidStorage(view){return !!view?.storage&&!view.storage_stale&&view.storage.paid_bytes>0;}
 function render(view){current=view;selectedAccount=view.selected||selectedAccount;
 if(view.accounts)renderAccounts(view);if(view.family){const changed=familyAccount!==selectedAccount||!familyInfo||familyCheckedAt!==view.family_checked_at;if(changed)renderFamily(view.family,{checkedAt:view.family_checked_at,stale:view.family_stale,animate:false});else updateFamilyCacheMeta(view.family_checked_at,view.family_stale,true);}else if(familyAccount===selectedAccount&&familyInfo)renderFamily(null);if(view.storage){if(storageAccount!==selectedAccount||storageCheckedAt!==view.storage_checked_at)renderStorage(view.storage,{checkedAt:view.storage_checked_at,stale:view.storage_stale});}else if(storageAccount===selectedAccount&&storageCheckedAt)renderStorage(null);if(view.storage_plan){if(planAccount!==selectedAccount||planCheckedAt!==view.storage_plan_checked_at)renderPlans(view.storage_plan,{checkedAt:view.storage_plan_checked_at,stale:view.storage_plan_stale});}else if(planAccount===selectedAccount&&planCheckedAt)renderPlans(null);renderActivation(view);const status=view.status||{},online=status.running&&status.authenticated,activated=!!view.icloud_activated,waiting=status.verification_required,running=status.running||view.launching,starting=running&&!online&&!waiting;
 if(storeAuthAccount!==selectedAccount||storeAuthPID!==(status.pid||0)||!online){$('purchaseResult').hidden=true;$('purchaseResult').textContent='';}
@@ -105,8 +106,9 @@ for(const [id,active] of [['authDot',online],['pushDot',status.push_connected],[
 $('accountTag').hidden=!view.account;$('accountTag').textContent=view.account;$('sidebarAccount').replaceChildren(document.createTextNode(view.account||'本机账户'));const sub=document.createElement('small');sub.textContent='Windows 工作空间';$('sidebarAccount').append(sub);
 // The account name and avatar are rendered from the account list (renderAccounts).
 $('startButton').hidden=running;$('startButton').textContent=status.state==='failed'?'重新连接':'连接账户';$('startButton').disabled=busy||starting;$('renewButton').hidden=!online;$('renewButton').disabled=busy||!view.control_ready;$('stopButton').hidden=!status.running;$('stopButton').disabled=busy;
-$('sessionHint').textContent=online?'上次续期 '+time(status.last_refresh_at):activated?'已保存 Apple 验收会话':'登录身份会在本机保留';$('deviceCount').textContent=status.device_count||'—';$('navCount').textContent=status.device_count||'—';const storageRefreshing=autoRefreshAttemptStatus(autoRefreshKey('storage',view.storage_checked_at))==='refreshing',planRefreshing=autoRefreshAttemptStatus(autoRefreshKey('plan',view.storage_plan_checked_at))==='refreshing';$('codeButton').disabled=busy||!view.code_ready||!online;$('devicesButton').disabled=busy||!online||!view.control_ready;$('storageButton').disabled=busy||storageRefreshing||(!activated&&(!online||!view.control_ready));$('planButton').disabled=busy||planRefreshing||(!activated&&(!online||!view.control_ready));$('purchaseButton').disabled=busy||!online||!view.control_ready||!purchaseAction;$('storeAuthButton').disabled=busy||!online||!view.control_ready;
-const cloudHint=!online?'请先在概览中连接账户并完成验证。已有激活会话可查询容量和方案，开通订阅仍需后台在线。':!view.control_ready?'账户已登录，正在等待后台控制连接。':busy?'正在处理当前操作，请稍候。':!purchaseAction?'请先读取可购方案；仅支持已核验的 50GB 币种与价格。':purchaseAction==='storage-skill-purchase-us'&&!storeAuthReady?'点击开通将先自动检查购买会话、报价和现有订阅，通过后再由你确认扣款。':'报价已核验，可确认开通；Apple 可能要求验证购买会话。';
+$('sessionHint').textContent=online?'上次续期 '+time(status.last_refresh_at):activated?'已保存 Apple 验收会话':'登录身份会在本机保留';$('deviceCount').textContent=status.device_count||'—';$('navCount').textContent=status.device_count||'—';const storageRefreshing=autoRefreshAttemptStatus(autoRefreshKey('storage',view.storage_checked_at))==='refreshing',planRefreshing=autoRefreshAttemptStatus(autoRefreshKey('plan',view.storage_plan_checked_at))==='refreshing';$('codeButton').disabled=busy||!view.code_ready||!online;$('devicesButton').disabled=busy||!online||!view.control_ready;$('storageButton').disabled=busy||storageRefreshing||(!activated&&(!online||!view.control_ready));$('planButton').disabled=busy||planRefreshing||(!activated&&(!online||!view.control_ready));$('purchaseButton').disabled=busy||!online||!view.control_ready||!purchaseAction||hasPaidStorage(view);$('paymentCheckButton').disabled=busy||!online||!view.control_ready;$('storeAuthButton').disabled=busy||!online||!view.control_ready;
+if(hasPaidStorage(view)){$('purchaseButton').textContent='iCloud+ 已开通';$('planSummary').textContent='Apple 已核验付费容量 '+gib(view.storage.paid_bytes)+'，无需再次开通。';}else if(purchaseAction){$('purchaseButton').textContent='开通 50GB · '+purchaseLabel;}
+const cloudHint=hasPaidStorage(view)?'iCloud+ 已开通 · 付费容量 '+gib(view.storage.paid_bytes)+'。可查询储存空间更新使用情况。':!online?'请先在概览中连接账户并完成验证。已有激活会话可查询容量和方案，开通订阅仍需后台在线。':!view.control_ready?'账户已登录，正在等待后台控制连接。':busy?'正在处理当前操作，请稍候。':!purchaseAction?'请先读取可购方案；仅支持已核验的 50GB 币种与价格。':purchaseAction==='storage-skill-purchase-us'&&!storeAuthReady?'点击开通将先自动检查购买会话、报价和现有订阅，通过后再由你确认扣款。':'报价已核验，可确认开通；Apple 可能要求验证购买会话。';
 $('icloudAccessHint').textContent=cloudHint;
 $('purchaseAvailability').textContent=cloudHint;
 $('icloudLoginLink').hidden=online;
@@ -133,7 +135,7 @@ function renderPlans(info,{checkedAt='',stale=false}={}){planAccount=selectedAcc
 function purchaseOutcomeMessage(result){
   if(!result.ok){
     if(result.stage==='purchase-store-session')return '购买会话已失效或随登录续期重置，请重新验证购买会话；未提交购买。';
-    if(['payment-confirmation','billing-confirmation'].includes(result.apple_hint))return 'Apple 返回付款或账单相关提示，请前往 Apple 账户页面检查付款方式。处理后先核对订阅与容量，不要连续提交购买。';
+    if(['payment-confirmation','billing-confirmation'].includes(result.apple_hint))return 'Apple 返回付款或账单相关提示，请检查该账号的可用付款方式或 Apple 账户余额。可在官方客户端兑换同地区礼品卡，到账后点击“付款准备完成，重新检查”；此提示不能单独确定错误原因。';
     if(result.stage==='purchase-skill-buy')return 'Apple 未接受此次购买。HTTP 200 仅表示收到响应，不代表已开通；具体原因请查看下方 Apple 错误码。若尚未添加付款方式，请先完成付款准备。';
     return result.message||'购买结果尚未确认，请先核对订阅和容量，不要重复提交。';
   }
@@ -252,8 +254,19 @@ $('hmeMoreButton').addEventListener('click',()=>{hmeVisible+=100;renderHME(hmeIn
 $('closeHMEEdit').addEventListener('click',()=>{$('hmeEditDialog').close();hmeEditing='';});
 $('hmeEditDialog').addEventListener('close',()=>{hmeEditing='';});
 $('hmeEditForm').addEventListener('submit',event=>{event.preventDefault();const email=hmeEditing,label=$('hmeEditLabel').value.trim(),note=$('hmeEditNote').value.trim();if(!email||!label)return;$('hmeEditDialog').close();action('hme-update',{code:email,label,note});});
+$('paymentCheckButton').addEventListener('click',async()=>{
+  if(busy)return;
+  const account=selectedAccount;
+  const quota=await action('storage-info');
+  if(!quota?.ok||selectedAccount!==account)return;
+  if(hasPaidStorage(current)){notice('付费容量已核验，iCloud+ 已开通。');return;}
+  if(!current?.purchase_preparation_available){notice('请重新连接账号加载新版购买预检查。',true);return;}
+  // Only reads/authentication: payment preparation never submits a purchase.
+  const prepared=await action('storage-purchase-prepare-us');
+  if(prepared?.ok&&selectedAccount===account)notice('预检查通过。余额请在 Apple 官方客户端核对；点击开通并确认后才会提交订阅。');
+});
 $('purchaseButton').addEventListener('click',async()=>{
-  if(busy||!purchaseAction||!purchaseLabel)return;
+  if(busy||!purchaseAction||!purchaseLabel||hasPaidStorage(current))return;
   const account=selectedAccount,requestedAction=purchaseAction;
   if(requestedAction==='storage-skill-purchase-us'){
     if(!current?.purchase_preparation_available){notice('购买链路已更新，请在此重新连接账号加载新版后台。',true);openLogin('reconnect');return;}

@@ -15,6 +15,8 @@
 `state/device.json` 保存稳定认证身份。普通登录的验证码需手动输入；
 Windows 本机验证码入口见下文。
 
+iCloud+ 开通与礼品卡付款准备见 [开通流程](docs/icloud-purchase.md)：官方客户端兑换 → 面板预检查 → 确认订阅 → 核验付费容量。
+
 ## Windows 运行
 
 需要 Go 1.26 或更新版本（已有 `bin/login.exe` 时可直接运行）。
