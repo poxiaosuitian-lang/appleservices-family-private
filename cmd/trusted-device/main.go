@@ -383,6 +383,23 @@ func run() (runErr error) {
 					}
 					result := control.Result{}
 					switch command.Action.Action {
+					case "code":
+						if factor != appleservices.TrustedDevice {
+							result.Message = "当前验证方式是短信，请填写手机收到的验证码"
+							break
+						}
+						generationCtx, stop := context.WithTimeout(command.Context, 15*time.Second)
+						code, codeErr := generateCode(generationCtx)
+						stop()
+						if codeErr != nil {
+							result.Message = "本机 Mac 验证码生成失败，请检查该账号的设备环境"
+							break
+						}
+						result.OK = true
+						result.Code = code
+						result.CodeKind = "trusted-device"
+						result.HideAt = time.Now().Add(time.Minute).UTC()
+						result.Message = "已从当前账号的本机 Mac 环境生成验证码"
 					case "resend-sms":
 						if time.Since(lastSent) < time.Minute {
 							result.Message = "请间隔一分钟再重发短信"
