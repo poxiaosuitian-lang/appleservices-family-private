@@ -37,6 +37,9 @@ func TestPrimaryMailServiceFailureClassification(t *testing.T) {
 	}{
 		{"activation-rejected", "/mailacct/v1/web/activateEmail", `{"errorCode":"-1234","errorMessage":"private-secret"}`, "邮箱创建（HTTP 403，代码 -1234）", 403, false},
 		{"session-expired", "/mailacct/v1/web/activateEmail", `{"errorCode":"-9008"}`, "邮箱创建未完成", 403, true},
+		{"numeric-session-expired", "/mailacct/v1/web/activateEmail", `{"errorCode":-9008}`, "邮箱创建未完成", 403, true},
+		{"numeric-rejection", "/mailacct/v1/web/emailAvailability", `{"errorCode":-9007}`, "邮箱名称检查（HTTP 200，代码 -9007）", 200, false},
+		{"malformed-error", "/mailacct/v1/web/emailAvailability", `{"errorCode":{"private":"private-secret"},"available":true}`, "邮箱名称检查（HTTP 200）", 200, false},
 		{"session-unauthorized", "/setup/ws/1/validate", `{}`, "邮箱状态查询未完成", 401, true},
 		{"too-long", "/mailacct/v1/web/emailAvailability", `{"errorCode":"MAX_LENGTH_VIOLATION"}`, "3–20", 400, false},
 		{"unknown-code", "/mailacct/v1/web/activateEmail", `{"errorCode":"private-secret"}`, "邮箱创建（HTTP 200）", 200, false},
@@ -176,7 +179,7 @@ func TestPrimaryMailUncertainSubmissionNeverReplays(t *testing.T) {
 }
 
 func TestPrimaryMailRejectsUnknownOrWrongAccountState(t *testing.T) {
-	for _, body := range []string{`{}`, `{"dsInfo":{"dsid":"999"},"webservices":{}}`, `{"dsInfo":{"dsid":"123"}}`, `{"dsInfo":{"dsid":"123"},"webservices":{"mccgateway":{"url":"https://evil.example"}}}`, `{"dsInfo":{"dsid":"123"},"webservices":{},"termsUpdateNeeded":true}`} {
+	for _, body := range []string{`{}`, `{"dsInfo":{"dsid":"999"},"webservices":{}}`, `{"dsInfo":{"dsid":"123"}}`, `{"dsInfo":{"dsid":"123"},"webservices":{"mccgateway":{"url":"https://evil.example"}}}`, `{"dsInfo":{"dsid":"123"},"webservices":{"mail":{"url":"invalid"}}}`, `{"dsInfo":{"dsid":"123"},"webservices":{},"termsUpdateNeeded":true}`} {
 		c := mailTestClient(t, func(r *http.Request) (int, string, error) {
 			if r.URL.Path != "/setup/ws/1/validate" {
 				t.Fatal("invalid state triggered mutation")
@@ -190,7 +193,7 @@ func TestPrimaryMailRejectsUnknownOrWrongAccountState(t *testing.T) {
 }
 
 func TestPrimaryMailAvailabilityMustBeExplicitAndBound(t *testing.T) {
-	for _, body := range []string{`{}`, `{"email":"alice@icloud.com"}`, `{"email":"other@icloud.com","available":true}`, `{"errorCode":"BLOCKED","email":"alice@icloud.com","available":true}`} {
+	for _, body := range []string{`{}`, `{"email":"alice@icloud.com"}`, `{"email":"other@icloud.com","available":true}`, `{"errorCode":"BLOCKED","email":"alice@icloud.com","available":true}`, `{"errorCode":-9007,"email":"alice@icloud.com","available":true}`, `{"errorCode":{},"email":"alice@icloud.com","available":true}`} {
 		c := mailTestClient(t, func(r *http.Request) (int, string, error) {
 			if r.URL.Path == "/setup/ws/1/validate" {
 				return 200, mailSetupResponse(false), nil
@@ -203,6 +206,26 @@ func TestPrimaryMailAvailabilityMustBeExplicitAndBound(t *testing.T) {
 		if _, err := c.Ensure(context.Background(), true, func(string) error { return nil }); err == nil {
 			t.Fatal("missing availability accepted")
 		}
+	}
+}
+
+func TestPrimaryMailChinaServiceUsesMatchingOrigin(t *testing.T) {
+	c := mailTestClient(t, func(r *http.Request) (int, string, error) {
+		if !strings.HasSuffix(r.URL.Hostname(), ".icloud.com.cn") || r.Header.Get("Origin") != "https://www.icloud.com.cn" || r.Header.Get("Referer") != "https://www.icloud.com.cn/" {
+			t.Fatal("China mailbox request used the wrong web origin")
+		}
+		if r.URL.Path == "/setup/ws/1/validate" {
+			return 200, strings.ReplaceAll(mailSetupResponse(false), ".icloud.com", ".icloud.com.cn"), nil
+		}
+		return 200, `{"email":"alice@icloud.com","available":true}`, nil
+	})
+	c.web.session.AccountCountry = "CHN"
+	if _, err := c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var availability any
+	if err := c.request(context.Background(), c.web.session.ServiceURL+"/mailacct/v1/web/emailAvailability", map[string]string{"email": "alice@icloud.com"}, &availability); err != nil {
+		t.Fatal(err)
 	}
 }
 

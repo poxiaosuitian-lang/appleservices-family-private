@@ -174,7 +174,7 @@ func run() (runErr error) {
 	}
 	passwordRemembered := storedPassword != ""
 	storedPassword = ""
-	status := runtimeStatus{PID: os.Getpid(), Running: true, State: "starting"}
+	status := initialRuntimeStatus(os.Getpid(), passwordRemembered)
 	if err := status.save(*dir); err != nil {
 		return err
 	}
@@ -323,15 +323,13 @@ func run() (runErr error) {
 	input := bufio.NewReader(os.Stdin)
 	localVerificationTried := false
 	verifyLocal := func(candidate *appleservices.Login) {
-		if localADI == nil || *listenOnly || *method == "sms-existing" || *method == "circle" {
-			return
-		}
-		attempted, verificationErr := candidate.CompleteLocalTwoFactor(func() (string, error) {
+		attempted, state, verificationErr := completeLocalVerification(*method, localADI != nil && !*listenOnly, candidate, func() (string, error) {
 			codeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			return generateCode(codeCtx)
 		})
 		localVerificationTried = attempted
+		status.LocalVerification = state
 		if verificationErr != nil {
 			fmt.Fprintln(os.Stderr, "Local device verification requires manual completion; no automatic retry.")
 		}
@@ -351,10 +349,7 @@ func run() (runErr error) {
 			status.State = "verification_required"
 			return errVerificationRequired
 		}
-		factor := appleservices.SMS
-		if *method == "trusted-device" || localVerificationTried {
-			factor = appleservices.TrustedDevice
-		}
+		factor := initialVerificationFactor(*method)
 		if *method != "sms-existing" && !localVerificationTried {
 			if err := login.RequestCode(factor); err != nil {
 				return err
@@ -381,49 +376,8 @@ func run() (runErr error) {
 					if command.Context.Err() != nil {
 						continue
 					}
-					result := control.Result{}
-					switch command.Action.Action {
-					case "code":
-						if factor != appleservices.TrustedDevice {
-							result.Message = "当前验证方式是短信，请填写手机收到的验证码"
-							break
-						}
-						generationCtx, stop := context.WithTimeout(command.Context, 15*time.Second)
-						code, codeErr := generateCode(generationCtx)
-						stop()
-						if codeErr != nil {
-							result.Message = "本机 Mac 验证码生成失败，请检查该账号的设备环境"
-							break
-						}
-						result.OK = true
-						result.Code = code
-						result.CodeKind = "trusted-device"
-						result.HideAt = time.Now().Add(time.Minute).UTC()
-						result.Message = "已从当前账号的本机 Mac 环境生成验证码"
-					case "resend-sms":
-						if time.Since(lastSent) < time.Minute {
-							result.Message = "请间隔一分钟再重发短信"
-						} else if login.RequestCode(factor) != nil {
-							result.Message = "短信发送失败，请稍后重试"
-						} else {
-							lastSent = time.Now()
-							result.OK = true
-							result.Message = "短信已发送"
-						}
-					case "submit-sms":
-						// The reason Apple gives is the only thing that
-						// separates an expired code from a rejected one, so it
-						// is reported instead of a fixed message.
-						if err := login.SubmitCode(factor, command.Code); err != nil {
-							result.Message = "验证码未被接受：" + err.Error()
-						} else {
-							result.OK = true
-							result.Message = "验证码已验证，正在完成登录"
-							verified = true
-						}
-					default:
-						result.Message = "请先完成短信验证"
-					}
+					result, completed := pendingVerificationAction(login, factor, command.Action.Action, command.Code, &lastSent, time.Now())
+					verified = completed
 					command.Reply <- result
 				}
 				if stopRequested(*dir, status.PID) {
@@ -629,6 +583,7 @@ func run() (runErr error) {
 		if status.VerificationRequired {
 			return control.Result{Stage: "verification-required", Message: "需要完成账号验证或重新连接，后台不会自动重复申请验证码"}
 		}
+		status.LocalVerification = localVerificationNotAttempted
 		renewed, devices, err := renewWithReconnect(beginRenewal, func() (maintainedLogin, error) {
 			candidate, loginErr := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 			if loginErr == nil {
@@ -1321,6 +1276,7 @@ func run() (runErr error) {
 				}
 				return result
 			}
+			status.LocalVerification = localVerificationNotAttempted
 			if err := active.BeginAccountValidation(); err != nil {
 				status.State, status.VerificationRequired = "refresh_failed", true
 				_ = status.save(*dir)

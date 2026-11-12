@@ -2,6 +2,7 @@ package appleservices
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Laky-64/appleservices/gsa"
@@ -146,5 +147,42 @@ func TestLocalTwoFactorOnlyUsesBoundExistingDeviceChallengeOnce(t *testing.T) {
 				t.Fatal("challenge completion was assumed")
 			}
 		})
+	}
+}
+
+type localChallengeRequestFailureBackend struct{ *fakeBackend }
+
+func (b *localChallengeRequestFailureBackend) RequestTrustedDeviceCode(_, _ string) error {
+	b.requests = append(b.requests, TrustedDevice)
+	return errors.New("synthetic authenticated response must not escape")
+}
+
+func TestLocalTwoFactorRequestFailureDoesNotGenerateOrRetryAndAllowsManualCode(t *testing.T) {
+	store := &memoryStore{session: verifiedTestSession()}
+	first := testResult(true)
+	first.TwoFactorMethod = "trustedDeviceSecondaryAuth"
+	backend := &localChallengeRequestFailureBackend{&fakeBackend{results: []*gsa.LoginResult{first, testResult(false)}}}
+	opts := testOptions(backend.fakeBackend, testDelegate)
+	opts = append(opts, func(o *options) {
+		o.newBackend = func(gsa.AnisetteProvider, *gsa.Session) loginBackend { return backend }
+	})
+	login, err := BeginLogin(Credentials{"owner@example.test", "test-password"}, store, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := 0
+	provider := func() (string, error) { generated++; return "123456", nil }
+	attempted, err := login.CompleteLocalTwoFactor(provider)
+	if !attempted || !errors.Is(err, ErrLocalCodeRequest) || strings.Contains(err.Error(), "authenticated response") {
+		t.Fatal("failed challenge request was not distinguished or exposed raw response")
+	}
+	if attempted, err := login.CompleteLocalTwoFactor(provider); attempted || err != nil {
+		t.Fatal("failed challenge request was automatically retried")
+	}
+	if generated != 0 || len(backend.requests) != 1 || len(backend.submits) != 0 || !login.NeedsTwoFactor() {
+		t.Fatal("request failure generated/submitted a code or completed authentication")
+	}
+	if err := login.SubmitCode(TrustedDevice, "654321"); err != nil || login.NeedsTwoFactor() {
+		t.Fatal("request failure blocked manual submission of a trusted-device code")
 	}
 }

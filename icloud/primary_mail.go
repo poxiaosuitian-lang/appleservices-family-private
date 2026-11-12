@@ -92,7 +92,10 @@ func (c *PrimaryMailClient) Check(ctx context.Context) (*PrimaryMailInfo, error)
 	if result.TermsUpdateNeeded {
 		return nil, ErrHMEWebRepairRequired
 	}
-	if result.Webservices["mail"].URL != "" {
+	if mailURL := result.Webservices["mail"].URL; mailURL != "" {
+		if !appleMailServiceURL(mailURL) {
+			return nil, errors.New("Apple 返回的邮箱服务地址无效，未确认邮箱状态")
+		}
 		return &PrimaryMailInfo{Exists: true}, nil
 	}
 	gateway := result.Webservices["mccgateway"].URL
@@ -239,8 +242,12 @@ func (c *PrimaryMailClient) request(ctx context.Context, endpoint string, body a
 		return errors.New("无法构造邮箱请求")
 	}
 	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Origin", "https://www.icloud.com")
-	r.Header.Set("Referer", "https://www.icloud.com/")
+	origin := "https://www.icloud.com"
+	if strings.HasSuffix(strings.ToLower(u.Hostname()), ".icloud.com.cn") {
+		origin = "https://www.icloud.com.cn"
+	}
+	r.Header.Set("Origin", origin)
+	r.Header.Set("Referer", origin+"/")
 	r.Header.Set("User-Agent", hmeWebUserAgent)
 	resp, err := c.web.http.Do(r)
 	if err != nil {
@@ -255,11 +262,26 @@ func (c *PrimaryMailClient) request(ctx context.Context, endpoint string, body a
 		return errors.New("邮箱服务响应读取失败")
 	}
 	var failure struct {
-		Code string `json:"errorCode"`
+		Code json.RawMessage `json:"errorCode"`
 	}
-	_ = json.Unmarshal(data, &failure)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || failure.Code != "" {
-		return primaryMailServiceError(u.Path, resp.StatusCode, failure.Code)
+	if err := json.Unmarshal(data, &failure); err != nil {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return primaryMailServiceError(u.Path, resp.StatusCode, "")
+		}
+		return errors.New("Apple 邮箱响应格式不完整")
+	}
+	code := ""
+	if len(failure.Code) != 0 && string(failure.Code) != "null" {
+		if json.Unmarshal(failure.Code, &code) != nil {
+			var number json.Number
+			if json.Unmarshal(failure.Code, &number) != nil {
+				return primaryMailServiceError(u.Path, resp.StatusCode, "")
+			}
+			code = number.String()
+		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || code != "" {
+		return primaryMailServiceError(u.Path, resp.StatusCode, code)
 	}
 	if json.Unmarshal(data, out) != nil {
 		return errors.New("Apple 邮箱响应格式不完整")

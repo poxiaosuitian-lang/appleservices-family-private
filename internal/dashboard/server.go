@@ -56,6 +56,7 @@ type Server struct {
 }
 type Status struct {
 	PasswordRemembered   bool      `json:"password_remembered"`
+	LocalVerification    string    `json:"local_verification,omitempty"`
 	PID                  int       `json:"pid"`
 	Running              bool      `json:"running"`
 	PushConnected        bool      `json:"push_connected"`

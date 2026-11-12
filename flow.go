@@ -233,6 +233,10 @@ func (l *Login) authenticate() error {
 
 func (l *Login) NeedsTwoFactor() bool { return l.needsTwoFactor }
 
+// ErrLocalCodeRequest distinguishes a failed challenge request from a code that
+// Apple did not accept. It intentionally excludes authenticated response details.
+var ErrLocalCodeRequest = errors.New("appleservices: local device challenge request failed; manual verification required")
+
 // CompleteLocalTwoFactor makes at most one attempt for an existing account's
 // trusted-device challenge. First-time accounts and SMS challenges stay manual.
 // The provider must use this account directory's native device identity.
@@ -247,7 +251,7 @@ func (l *Login) CompleteLocalTwoFactor(codeProvider func() (string, error)) (boo
 	}
 	l.localCodeTried = true
 	if err := l.RequestCode(TrustedDevice); err != nil {
-		return true, errors.New("appleservices: local device challenge was not accepted; manual verification required")
+		return true, ErrLocalCodeRequest
 	}
 	code, err := codeProvider()
 	if err != nil {

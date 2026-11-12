@@ -84,6 +84,21 @@ func TestDashboardFiltersRuntimeSecretsAndBindsDaemonPID(t *testing.T) {
 	if result.StoreSessionReady == nil || *result.StoreSessionReady {
 		t.Fatal("cleared commerce availability remained ready")
 	}
+	// A pending login may still have a usable encrypted password. Preserve
+	// that fact and the local verification outcome without claiming online.
+	for _, outcome := range []string{"failed", "request_failed"} {
+		data, _ = json.Marshal(map[string]any{"pid": os.Getpid(), "running": true,
+			"authenticated": false, "state": "awaiting_device_code", "password_remembered": true,
+			"local_verification": outcome, "private_code": "synthetic-code"})
+		if err := os.WriteFile(filepath.Join(dir, "runtime.json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		result = server.snapshot(context.Background())
+		encoded, _ = json.Marshal(result)
+		if !result.Status.PasswordRemembered || result.Status.LocalVerification != outcome || result.Status.Authenticated || strings.Contains(string(encoded), "synthetic-code") {
+			t.Fatal("pending verification state was lost or leaked secrets")
+		}
+	}
 	record := controller.Record
 	record.PID++
 	data, _ = json.Marshal(record)

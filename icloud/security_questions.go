@@ -67,13 +67,16 @@ func parseSecurityQuestions(data []byte) ([]SecurityQuestion, error) {
 		return nil, errors.New("无法读取 Apple 安全问题")
 	}
 	var blocks int
+	var invalidJSON bool
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "script" {
 			for _, attr := range n.Attr {
 				if attr.Key == "class" && strings.Contains(" "+attr.Val+" ", " boot_args ") && n.FirstChild != nil {
 					blocks++
-					_ = json.Unmarshal([]byte(n.FirstChild.Data), &boot)
+					if json.Unmarshal([]byte(n.FirstChild.Data), &boot) != nil {
+						invalidJSON = true
+					}
 				}
 			}
 		}
@@ -83,7 +86,7 @@ func parseSecurityQuestions(data []byte) ([]SecurityQuestion, error) {
 	}
 	walk(doc)
 	questions := boot.Direct.TwoSV.SecurityQuestions.Questions
-	if blocks != 1 || len(questions) == 0 || len(questions) > 3 {
+	if invalidJSON || blocks != 1 || len(questions) == 0 || len(questions) > 3 {
 		return nil, errors.New("Apple 未返回可确认的安全问题，未提交答案")
 	}
 	seen := map[int]bool{}

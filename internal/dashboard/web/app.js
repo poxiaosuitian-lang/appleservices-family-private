@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id), token = document.querySelector('met
 let loginMode = 'reconnect', loginAccount = '', current = null, busy = false, privateCode = '', privateCodeKind = '', hideAt = 0, codeTotalMs = 60000, lastState = '', lastQuery = '', lastRefresh = '', lastRequest = '', noticeTimer, selectedAccount = localStorage.getItem('selected-account') || '', familyInfo = null, familyAccount = '', familyCheckedAt = '', familyStale = false, storageAccount = '', storageCheckedAt = '', planAccount = '', planCheckedAt = '', poolOrganizerAccount = localStorage.getItem('family-organizer-account') || '', poolOrganizerName = localStorage.getItem('family-organizer-name') || '', purchaseAction = '', purchaseLabel = '', hmeInfo = null, hmeAccount = '', hmeCandidate = '', hmeFilter = 'active', hmeVisible = 100, hmeEditing = '', activationInfo = null, activationAccount = '', autoRefreshScheduled = false;
 let storeAuthReady = false, storeAuthAccount = '', storeAuthPID = 0, storeAuthRefresh = '';
 let giftPreparation = '', giftOwner = '', giftPID = 0;
+let verificationContext = '';
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
 let themePref = localStorage.getItem('appleservices:theme') || 'light';
@@ -114,12 +115,19 @@ function renderCodeSlots(chars) {
 }
 function clearCode() {
   privateCode = '';
+  privateCodeKind = '';
   hideAt = 0;
   $('codeDisplay').classList.remove('shown');
   renderCodeSlots(['•', '•', '•', '•', '•', '•']);
   $('codeTimerFill')?.setAttribute('width', '0');
-  $('codeDetail').textContent = current?.code_ready ? '点击按钮显示六位验证码' : '登录后可生成六位验证码';
+  $('codeDetail').textContent = codeIdleMessage(current);
   $('copyButton').disabled = true;
+}
+function codeIdleMessage(view) {
+  const status = view?.status || {};
+  if (status.state === 'awaiting_device_code' && status.local_verification === 'request_failed') return '验证码发送请求未完成，请改用其他验证方式';
+  if (status.state === 'awaiting_device_code' && status.local_verification === 'failed') return '本机验证未完成，请使用受信任设备或短信验证码';
+  return status.running && status.authenticated && view?.control_ready && view.code_ready ? '点击按钮显示六位验证码' : '完成登录后可显示本机验证码';
 }
 function showCode(result) {
   privateCode = result.code;
@@ -680,6 +688,15 @@ function render(view) {
   renderActivation(view);
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
+  const nextVerificationContext = JSON.stringify([selectedAccount, status.pid || 0, status.state || '']);
+  if (verificationContext !== nextVerificationContext) {
+    verificationContext = nextVerificationContext;
+    $('smsCode').value = '';
+    clearCode();
+  }
+  const deviceCode = ['awaiting_device_code', 'awaiting_account_validation'].includes(status.state);
+  const localVerificationFailed = status.state === 'awaiting_device_code' && status.local_verification === 'failed';
+  const localVerificationRequestFailed = status.state === 'awaiting_device_code' && status.local_verification === 'request_failed';
   const mail = view.primary_mail, mailWorking = ['checking', 'submitted'].includes(mail?.phase) && online && Date.now() - Date.parse(mail?.updated_at || '') < 120000;
   $('primaryMailSummary').textContent = mail?.message || '新导入账号登录后自动检查；已有邮箱直接复用，没有则自动创建。';
   $('primaryMailAddress').textContent = mail?.email || '';
@@ -730,6 +747,7 @@ function render(view) {
     initializing: '正在初始化本机身份',
     signing_in: '正在登录 Apple 账户',
     starting: '正在建立后台连接',
+    failed: '后台登录未完成',
     refresh_failed: '登录刷新暂未完成',
     verification_required: '需要重新验证账户',
     awaiting_sms: '完成短信验证',
@@ -741,7 +759,7 @@ function render(view) {
     verifying_pairing: '正在验证设备配对'
   };
   $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户'));
-  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '账户会话仍保留，后台正在恢复推送连接。' : '设备身份已保留，后台会自动保持登录。') : waiting ? (status.state === 'awaiting_account_validation' ? '请使用受信任 Apple 设备收到的验证码完成账户验证。' : '请使用绑定手机号收到的验证码完成登录。') : starting ? '正在恢复这台电脑的设备身份，请稍等。' : activated ? 'Apple 已接受该账号的 iCloud 会话，可直接读取配额与可购方案。' : status.state === 'failed' ? '后台运行出错，设备身份和已保存的会话仍保留。请重新连接。' : '登录后，即可查看设备和生成本机验证码。';
+  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '账户会话仍保留，后台正在恢复推送连接。' : '设备身份已保留，后台会自动保持登录。') : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : starting ? '正在恢复这台电脑的设备身份，请稍等。' : status.state === 'failed' ? '本次登录未完成，设备身份和已保存的会话仍保留。请重新连接。' : activated ? '已保留此前通过验收的 iCloud 会话；当前后台尚未登录。' : '登录后，即可查看设备和生成本机验证码。';
 
   const pairingStates = {
     awaiting_approval: '收到官方客户端配对请求，请在登录请求中允许。',
@@ -764,7 +782,7 @@ function render(view) {
   const dot = document.createElement('i');
   $('statusBadge').append(dot, document.createTextNode(online ? '在线' : waiting ? '待验证' : starting ? '连接中' : '未连接'));
 
-  $('authState').textContent = online ? '已认证' : activated ? 'iCloud 已激活' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
+  $('authState').textContent = online ? '已认证' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
   $('pushState').textContent = status.push_connected ? '已连接' : status.push_issue === 'reconnecting' ? '重连中' : '未连接';
   $('renewState').textContent = online ? '每 10 分钟' : activated ? '按需验证' : '等待登录';
   for (const [id, active] of [['authDot', online], ['pushDot', status.push_connected], ['renewDot', online]]) $(id).classList.toggle('active', !!active);
@@ -784,12 +802,12 @@ function render(view) {
   $('stopButton').hidden = !status.running;
   $('stopButton').disabled = busy;
 
-  $('sessionHint').textContent = online ? '上次续期 ' + time(status.last_refresh_at) : activated ? '已保存 Apple 验收会话' : '登录身份会在本机保留';
+  $('sessionHint').textContent = online ? '上次续期 ' + time(status.last_refresh_at) : waiting ? '当前登录尚未完成验证' : activated ? '已保留此前验收会话' : '登录身份会在本机保留';
   $('deviceCount').textContent = status.device_count || '—';
   $('navCount').textContent = status.device_count || '—';
 
   const storageRefreshing = autoRefreshAttemptStatus(autoRefreshKey('storage', view.storage_checked_at)) === 'refreshing', planRefreshing = autoRefreshAttemptStatus(autoRefreshKey('plan', view.storage_plan_checked_at)) === 'refreshing';
-  $('codeButton').disabled = busy || !view.code_ready || !online;
+  $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online;
   $('devicesButton').disabled = busy || !online || !view.control_ready;
   $('storageButton').disabled = busy || storageRefreshing || (!activated && (!online || !view.control_ready));
   $('planButton').disabled = busy || planRefreshing || (!activated && (!online || !view.control_ready));
@@ -836,9 +854,12 @@ function render(view) {
   $('hmeReachableCodeForm').querySelector('button').disabled = busy;
 
   $('smsPanel').hidden = !['awaiting_sms', 'awaiting_existing_sms', 'awaiting_device_code', 'awaiting_account_validation'].includes(status.state);
-  const smsCode = ['awaiting_sms', 'awaiting_existing_sms'].includes(status.state), deviceCode = !smsCode;
   $('smsPanel').querySelector('h3').textContent = deviceCode ? '输入受信任设备上的验证码' : '输入短信验证码';
-  $('smsPanel').querySelector('p').textContent = deviceCode ? '请在已登录该账号的 Apple 设备上获取六位验证码。' : status.state === 'awaiting_existing_sms' ? '提交已经收到的短信码；本次不会再次发送短信。' : '验证码已发送到账户绑定的手机号。';
+  $('smsPanel').querySelector('p').textContent = localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或重新连接并选择短信验证。' : localVerificationFailed ? '本机验证未完成。请填写受信任设备上的六位验证码，或重新连接并选择短信验证。' : deviceCode ? '请在已登录该账号的受信任 Apple 设备上获取六位验证码。' : status.state === 'awaiting_existing_sms' ? '提交已经收到的短信码；本次不会再次发送短信。' : '验证码已发送到账户绑定的手机号。';
+  const codeLabel = deviceCode ? '六位设备验证码' : '六位短信验证码';
+  $('smsCode').placeholder = codeLabel;
+  $('smsCode').setAttribute('aria-label', codeLabel);
+  $('smsCode').disabled = busy;
   $('resendButton').hidden = status.state !== 'awaiting_sms';
   $('resendButton').disabled = busy;
   $('smsForm').querySelector('button[type="submit"]').disabled = busy;
@@ -864,7 +885,7 @@ function render(view) {
   $('denyButton').disabled = busy;
 
   $('lastUpdated').textContent = running ? '后台运行中 · ' + time(status.updated_at) : '后台未运行';
-  if (!privateCode) $('codeDetail').textContent = view.code_ready ? '点击按钮显示六位验证码' : '登录后可生成六位验证码';
+  if (!privateCode) $('codeDetail').textContent = codeIdleMessage(view);
   if (online && lastState !== status.state) activity('后台登录已连接');
   if (!online && lastState === 'online') { activity('后台登录状态已变化'); clearCode(); }
   lastState = status.state;
@@ -988,7 +1009,7 @@ async function action(name, extra = {}, options = {}) {
       busy = false; document.body.classList.remove('busy'); if (current) render(current);
     }
   }
-  const actionAccount = selectedAccount, actionPID = current?.status?.pid || 0, actionRefresh = current?.status?.last_refresh_at || '';
+  const actionAccount = selectedAccount, actionPID = current?.status?.pid || 0, actionRefresh = current?.status?.last_refresh_at || '', actionVerificationContext = verificationContext;
   const familyAction = name.startsWith('family-'), hmeAction = name.startsWith('hme-');
   busy = true;
   document.body.classList.add('busy');
@@ -1102,7 +1123,7 @@ async function action(name, extra = {}, options = {}) {
       }
     }
     if (options.autoKey) autoRefreshState.delete(options.autoKey);
-    if (result.code) showCode(result);
+    if (result.code && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionVerificationContext === verificationContext) showCode(result);
     else if (!options.silent) notice(result.message || '操作已完成');
     await poll();
     return result;

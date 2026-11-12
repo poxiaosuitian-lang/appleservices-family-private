@@ -100,3 +100,19 @@ func TestSecurityQuestionsParserRejectsUnknownHTML(t *testing.T) {
 		}
 	}
 }
+
+func TestMalformedSecurityQuestionDoesNotSubmitSavedAnswers(t *testing.T) {
+	// Unmarshal can populate valid IDs/text while returning a type error for
+	// number. Those partial fields are not a verified challenge.
+	body := strings.ReplaceAll(questionBoot, `"number":2`, `"number":"invalid"`)
+	p := &testQuestionProvider{answers: []SecurityQuestionAnswer{{ID: 136, Answer: "synthetic-one"}, {ID: 142, Answer: "synthetic-two"}}}
+	req := func(_ context.Context, _ *hmeAuthState, method, _ string, _ []byte, _ http.Header) (*http.Response, []byte, error) {
+		if method != http.MethodGet {
+			t.Fatal("submitted answers to a partially decoded challenge")
+		}
+		return &http.Response{StatusCode: 412}, []byte(body), nil
+	}
+	if err := answerSecurityQuestions(context.Background(), "https://idmsa.apple.com/appleauth/auth", &hmeAuthState{}, req, func(*hmeAuthState) http.Header { return make(http.Header) }, p); err == nil {
+		t.Fatal("partially decoded challenge accepted")
+	}
+}

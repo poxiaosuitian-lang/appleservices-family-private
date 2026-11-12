@@ -27,8 +27,21 @@ func Load(dir, appleID string) (*State, error) {
 		return nil, err
 	}
 	var s State
-	if json.Unmarshal(data, &s) != nil || !strings.EqualFold(strings.TrimSpace(appleID), s.AppleID) || s.Phase == "" {
+	var checkpoint struct {
+		Submitted *bool `json:"submitted"`
+	}
+	if json.Unmarshal(data, &s) != nil || json.Unmarshal(data, &checkpoint) != nil || checkpoint.Submitted == nil ||
+		strings.TrimSpace(appleID) == "" || !strings.EqualFold(strings.TrimSpace(appleID), s.AppleID) {
 		return nil, errors.New("邮箱任务账号绑定无效")
+	}
+	switch s.Phase {
+	case "pending", "checking", "blocked", "missing", "ready":
+	case "submitted", "unconfirmed":
+		if !s.Submitted {
+			return nil, errors.New("邮箱任务提交标记不完整，已停止重复创建")
+		}
+	default:
+		return nil, errors.New("邮箱任务状态无效")
 	}
 	return &s, nil
 }
@@ -49,8 +62,22 @@ func (s *State) Save(dir string) error {
 		return err
 	}
 	path := filepath.Join(dir, "primary-mail-status.json")
-	if err = os.WriteFile(path+".tmp", data, 0600); err != nil {
+	file, err := os.CreateTemp(dir, ".primary-mail-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(path+".tmp", path)
+	defer os.Remove(file.Name())
+	if _, err = file.Write(data); err == nil {
+		// Activation must not start until its submission checkpoint has reached
+		// storage. Closing a buffered file alone does not provide that guarantee.
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(file.Name(), path)
 }
