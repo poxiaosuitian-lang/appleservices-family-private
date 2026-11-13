@@ -628,7 +628,7 @@ func run() (runErr error) {
 	pendingHMECandidate := ""
 	pendingReachableEmail := ""
 	loadHME := func(actionCtx context.Context) (*icloud.HideMyEmailInfo, error) {
-		if err := requireHMEFamilyMember(*dir, time.Now().UTC()); err != nil {
+		if err := requireHMEAccess(actionCtx, *dir, active); err != nil {
 			return nil, err
 		}
 		if hmeClient == nil {
@@ -678,7 +678,7 @@ func run() (runErr error) {
 		if action == "hme-accept-terms" {
 			queryCtx, done := context.WithTimeout(actionCtx, 115*time.Second)
 			defer done()
-			if err := requireHMEFamilyMember(*dir, time.Now().UTC()); err != nil {
+			if err := requireHMEAccess(actionCtx, *dir, active); err != nil {
 				return control.Result{Message: "当前账号不满足隐藏邮件地址家庭条件：" + err.Error(), Stage: "hme-family"}
 			}
 			var clientErr error

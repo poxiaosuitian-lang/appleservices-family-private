@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,27 @@ import (
 	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/control"
 )
+
+type hmeQuotaFixture struct {
+	quota *icloud.StorageInfo
+	err   error
+}
+
+func (f hmeQuotaFixture) StorageInfo(context.Context) (*icloud.StorageInfo, error) {
+	return f.quota, f.err
+}
+
+func TestHMEAccessAcceptsVerifiedPersonalSubscription(t *testing.T) {
+	dir := t.TempDir()
+	if err := requireHMEAccess(context.Background(), dir, hmeQuotaFixture{quota: &icloud.StorageInfo{PaidBytes: 50 << 30}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []any{nil, hmeQuotaFixture{}, hmeQuotaFixture{quota: &icloud.StorageInfo{TotalBytes: 50 << 30}}, hmeQuotaFixture{quota: &icloud.StorageInfo{PaidBytes: 50 << 30}, err: errors.New("read failed")}} {
+		if requireHMEAccess(context.Background(), dir, source) == nil {
+			t.Fatal("missing or unverified personal entitlement accepted")
+		}
+	}
+}
 
 func TestReachableVerificationReconcilesAppliedAppleMutation(t *testing.T) {
 	info := &icloud.HideMyEmailInfo{ForwardToEmails: []string{"primary@example.test", "new@example.test"}}

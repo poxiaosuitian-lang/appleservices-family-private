@@ -85,6 +85,7 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
     });
     await scenario(browser,{paid:50},async(p,c)=>{
       assert(await p.locator('#purchaseButton').isDisabled());
+      assert.equal(await p.locator('#hmeCard').evaluate(el=>el.hidden),false,'personal iCloud+ must expose hidden email settings without family membership');
       assert.match(await p.locator('#purchaseAvailability').innerText(),/已开通.*50GB/);
       await p.reload();await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
       assert(await p.locator('#purchaseButton').isDisabled());assert.deepEqual(c,[]);

@@ -837,9 +837,10 @@ function render(view) {
   $('familyRemoveMember').disabled = busy || familyStale || !selectedFamily?.organizer;
   $('familyRemoveButton').disabled = busy || familyStale || !selectedFamily?.organizer || !$('familyRemoveMember').value;
 
-  const hmeEligible = !!selectedFamily?.member && !selectedFamily?.organizer && selectedFamily?.storage_known && selectedFamily?.storage_participating && selectedFamily?.storage_available && selectedFamily?.storage_enabled;
+  const ownHME = hasPaidStorage(view) && !view.storage_stale;
+  const hmeEligible = ownHME || (!!selectedFamily?.member && !selectedFamily?.organizer && selectedFamily?.storage_known && selectedFamily?.storage_participating && selectedFamily?.storage_available && selectedFamily?.storage_enabled);
   $('hmeCard').hidden = !hmeEligible;
-  const hmeReady = hmeEligible && !familyStale && online && view.control_ready && view.hide_my_email_available;
+  const hmeReady = hmeEligible && (ownHME || !familyStale) && online && view.control_ready && view.hide_my_email_available;
   $('hmeListButton').disabled = busy || !hmeReady;
   $('hmeGenerateButton').disabled = busy || !hmeReady;
   $('hmeReserveButton').disabled = busy || !hmeReady || !hmeCandidate || !$('hmeCreateLabel').value.trim();
@@ -995,7 +996,7 @@ function purchaseOutcomeMessage(result) {
 
 async function action(name, extra = {}, options = {}) {
   if (busy) return;
-  if (name.startsWith('hme-') && familyStale) {
+  if (name.startsWith('hme-') && familyStale && !(hasPaidStorage(current) && !current?.storage_stale)) {
     try {
       busy = true; document.body.classList.add('busy'); if (current) render(current);
       const refreshed = await api('action', { action: 'family-info' });

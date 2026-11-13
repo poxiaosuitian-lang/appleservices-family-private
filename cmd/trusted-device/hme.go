@@ -1,14 +1,28 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/control"
 )
+
+func requireHMEAccess(ctx context.Context, dir string, source any) error {
+	if reader, ok := source.(interface {
+		StorageInfo(context.Context) (*icloud.StorageInfo, error)
+	}); ok {
+		quota, err := reader.StorageInfo(ctx)
+		if err == nil && quota != nil && quota.PaidBytes >= 50<<30 {
+			return nil
+		}
+	}
+	return requireHMEFamilyMember(dir, time.Now().UTC())
+}
 
 type hmeFamilyCache struct {
 	Version   int                `json:"version"`
