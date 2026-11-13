@@ -42,6 +42,43 @@ func TestPrivateStoreCheckpointExcludesPasswordCodeAndGiftState(t *testing.T) {
 	}
 }
 
+func TestRejectedFrameworkCheckpointCannotRestoreCommerceCredentials(t *testing.T) {
+	r := helperResultFixture()
+	r.Cookies = []storeAuthCookies{{URL: "https://buy.itunes.apple.com/", Cookies: []*http.Cookie{{Name: "session", Value: "synthetic-cookie"}}}}
+	s, err := importFrameworkSession(r, r.Email, r.DSID, r.GUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InvalidateFrameworkStoreSession()
+	data, err := s.PrivateCheckpoint(r.Email, r.DSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "synthetic-token") || strings.Contains(string(data), "synthetic-cookie") {
+		t.Fatal("rejected commerce credentials persisted")
+	}
+	restored, err := restoreFrameworkCheckpoint(data, r.Email, r.DSID, r.GUID)
+	if err != nil || !restored.NeedsReauthentication() || restored.MatchesAccount(r.DSID) ||
+		!restored.CanReuseFrameworkState(r.Email, r.DSID) {
+		t.Fatal("rejected checkpoint restored a usable login or lost machine provisioning")
+	}
+	if _, err := restored.ReadSkillSubscription(context.Background()); err == nil {
+		t.Fatal("machine-only checkpoint made an authenticated request")
+	}
+	for _, binding := range [][3]string{{"other@example.test", r.DSID, r.GUID}, {r.Email, "4321", r.GUID}, {r.Email, r.DSID, "111122334455"}} {
+		if _, err := restoreFrameworkCheckpoint(data, binding[0], binding[1], binding[2]); err == nil {
+			t.Fatal("rejected checkpoint crossed account or hardware identity")
+		}
+	}
+	var invalid storeAuthMessage
+	_ = json.Unmarshal(data, &invalid)
+	invalid.Token = r.Token
+	data, _ = json.Marshal(invalid)
+	if _, err := restoreFrameworkCheckpoint(data, r.Email, r.DSID, r.GUID); err == nil {
+		t.Fatal("rejected checkpoint accepted a hidden token")
+	}
+}
+
 func TestFrameworkSessionBinding(t *testing.T) {
 	for _, test := range []struct {
 		name   string

@@ -980,6 +980,7 @@ function renderPlans(info, { checkedAt = '', stale = false } = {}) {
 
 function purchaseOutcomeMessage(result) {
   if (!result.ok) {
+    if (result.stage === 'purchase-store-token-expired') return '购买会话已失效，请点击“重新检查付款”完成认证后再确认开通。';
     if (result.stage === 'purchase-store-session') return '购买会话已失效或随登录续期重置，请重新验证购买会话；未提交购买。';
     if (['payment-confirmation', 'billing-confirmation'].includes(result.apple_hint)) return 'Apple 返回付款或账单相关提示，请检查该账号的可用付款方式或 Apple 账户余额。可在官方客户端兑换同地区礼品卡，到账后点击“重新检查付款”；此提示不能单独确定错误原因。';
     if (result.stage === 'purchase-skill-buy') return 'Apple 未接受此次购买。HTTP 200 仅表示收到响应，不代表已开通；具体原因请查看下方 Apple 错误码。若尚未添加付款方式，请先完成付款准备。';
@@ -1060,8 +1061,10 @@ async function action(name, extra = {}, options = {}) {
         openLogin('reconnect');
         return;
       }
-      if (result.stage === 'purchase-store-session') {
+      if (['purchase-store-session', 'purchase-store-token-expired'].includes(result.stage)) {
         storeAuthReady = false;
+        if (current && actionAccount === selectedAccount) current.store_session_ready = false;
+        giftPreparation = '';
         $('storeAuthSummary').textContent = '购买会话不可用，请重新验证购买会话。';
       }
       if (name === 'storage-skill-auth-local') {
@@ -1080,7 +1083,7 @@ async function action(name, extra = {}, options = {}) {
     if (result.store_authentication?.ready && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionRefresh === (current?.status?.last_refresh_at || '')) {
       storeAuthReady = true;
       storeAuthAccount = selectedAccount;
-      $('storeAuthSummary').textContent = '购买会话认证通过 · 当前后台会话可用 · 临时会话不会持久化';
+      $('storeAuthSummary').textContent = '购买会话已认证';
     }
     if (result.storage) {
       const checkedAt = new Date().toISOString();
@@ -1295,6 +1298,8 @@ $('purchaseButton').addEventListener('click', async () => {
 $('storeAuthButton').addEventListener('click', () => {
   if (busy) return;
   storeAuthReady = false;
+  giftPreparation = '';
+  if (current) current.store_session_ready = false;
   $('storeAuthSummary').textContent = '正在验证购买会话，Apple 如要求验证码将由当前本机身份完成，请稍候…';
   action('storage-skill-auth-local');
 });
@@ -1338,6 +1343,16 @@ $('loginForm').addEventListener('submit', async event => {
     if (loginMode === 'reconnect' && loginAccount !== selectedAccount) throw new Error('当前账号已切换，请重新打开连接窗口');
     const result = await api(loginMode === 'add' ? 'accounts/add' : 'start', creds);
     if (!result.ok) throw new Error(result.message);
+    if (loginMode === 'add' && result.account_id) {
+      selectedAccount = result.account_id;
+      localStorage.setItem('selected-account', selectedAccount);
+      familyInfo = null; familyAccount = ''; familyCheckedAt = ''; familyStale = false;
+      storageAccount = ''; storageCheckedAt = ''; planAccount = ''; planCheckedAt = '';
+      purchaseAction = ''; purchaseLabel = ''; activationInfo = null; activationAccount = '';
+      storeAuthReady = false; storeAuthAccount = ''; storeAuthPID = 0; storeAuthRefresh = '';
+      giftPreparation = ''; giftOwner = ''; giftPID = 0;
+      clearCode(); resetHME(); renderFamily(null); renderStorage(null); renderPlans(null);
+    }
     $('loginDialog').close();
     notice(result.message);
     await poll();

@@ -21,6 +21,9 @@ func (l *Login) RestoreStorePurchaseSession(ctx context.Context) (bool, error) {
 	if l.StorePurchaseSessionReady() {
 		return true, nil
 	}
+	if l.storeCommerce.NeedsReauthentication() {
+		return false, nil
+	}
 	data, err := store.LoadStoreSession(l.creds.AppleID, l.client.DSID)
 	if err != nil {
 		return false, nil
@@ -30,8 +33,16 @@ func (l *Login) RestoreStorePurchaseSession(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
+	if session.NeedsReauthentication() {
+		l.storeCommerce = session
+		return false, nil
+	}
 	if _, err := session.ReadSkillSubscription(ctx); err != nil {
 		if !session.MatchesAccount(l.client.DSID) {
+			l.storeCommerce = session
+			if err := l.saveStorePurchaseSession(); err != nil {
+				return false, &icloud.StorageError{Stage: "purchase-store-checkpoint-save"}
+			}
 			return false, nil
 		}
 		return false, err

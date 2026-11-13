@@ -33,8 +33,11 @@ type PurchaseResult struct {
 	ExternalClientRequired bool   `json:"external_client_required"`
 	HandoffPath            string `json:"handoff_path,omitempty"`
 	QuotaVerified          bool   `json:"quota_verified"`
-	confirmation           url.Values
-	confirmationOriginal   url.Values
+	// VerifiedStorage is the readback used to verify completion. The control
+	// layer publishes it as storage so the dashboard also updates its cache.
+	VerifiedStorage      *StorageInfo `json:"-"`
+	confirmation         url.Values
+	confirmationOriginal url.Values
 }
 
 const (

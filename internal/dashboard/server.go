@@ -1148,6 +1148,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			result, id := s.addAccount(r.Context(), creds)
 			if id != "" {
+				result.AccountID = id
 				result.Message = strings.TrimSpace(result.Message)
 			}
 			json.NewEncoder(w).Encode(result)

@@ -55,6 +55,7 @@ type Action struct {
 	Note            string                          `json:"note,omitempty"`
 }
 type Result struct {
+	AccountID           string                          `json:"account_id,omitempty"`
 	GiftCard            *icloud.GiftCardInfo            `json:"gift_card,omitempty"`
 	OK                  bool                            `json:"ok"`
 	Message             string                          `json:"message,omitempty"`

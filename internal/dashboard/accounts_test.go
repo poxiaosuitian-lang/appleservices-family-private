@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,41 @@ import (
 
 	"github.com/Laky-64/appleservices"
 	"github.com/Laky-64/appleservices/anisette"
+	"github.com/Laky-64/appleservices/internal/control"
 )
+
+func TestAddAccountResponseIdentifiesRegisteredAccount(t *testing.T) {
+	root := t.TempDir()
+	server, err := New(Config{Dir: root, Worker: filepath.Join(root, "missing-worker.exe"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.listener.Close()
+	// A missing worker keeps this endpoint test offline. Registration still
+	// succeeds and must identify its entry, including when login cannot start.
+	var accountID string
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest("POST", server.URL()+"/api/accounts/add", strings.NewReader(`{"apple_id":"new@example.test","password":"synthetic-password"}`))
+		request.Header.Set("X-App-Token", server.token)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		var result control.Result
+		if recorder.Code != 200 || json.Unmarshal(recorder.Body.Bytes(), &result) != nil {
+			t.Fatal("add-account response was not readable")
+		}
+		if result.AccountID == "" || len(server.accounts) != 1 || result.AccountID != server.accounts[0].ID {
+			t.Fatal("registered account ID was omitted or did not match the registry")
+		}
+		if attempt > 0 && result.AccountID != accountID {
+			t.Fatal("duplicate add changed the account binding")
+		}
+		accountID = result.AccountID
+		if strings.Contains(recorder.Body.String(), "synthetic-password") {
+			t.Fatal("add-account response leaked the submitted password")
+		}
+	}
+}
 
 // TestAddingAccountDoesNotOverwriteExistingAccount is the regression test for
 // the reported bug: adding a second account used to relaunch the worker in the

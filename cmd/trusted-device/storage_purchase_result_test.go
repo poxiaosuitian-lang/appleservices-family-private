@@ -56,3 +56,23 @@ func TestSkillPurchaseDistinguishesLocalSessionFromSubmittedPurchase(t *testing.
 		}
 	}
 }
+
+func TestSkillPurchaseExpiredTokenRequestsStoreAuthentication(t *testing.T) {
+	result := skillStoragePurchaseResult(nil, &icloud.StorageError{Stage: "purchase-store-token-expired", HTTPStatus: 200, AppleCode: "2034"})
+	if result.OK || result.AppleCode != "2034" || !strings.Contains(result.Message, "重新认证") || strings.Contains(result.Message, "付款方式") || strings.Contains(result.Message, "未提交购买") {
+		t.Fatal("expired purchase token misreported as a payment failure or an unsent request")
+	}
+}
+
+func TestSkillPurchasePublishesVerifiedQuotaForDashboardCache(t *testing.T) {
+	quota := &icloud.StorageInfo{TotalBytes: 50 * 1024 * 1024 * 1024, PaidBytes: 50 * 1024 * 1024 * 1024}
+	purchase := &icloud.PurchaseResult{State: "completed", QuotaVerified: true, VerifiedStorage: quota}
+	result := skillStoragePurchaseResult(purchase, nil)
+	if !result.OK || result.Storage != quota {
+		t.Fatal("verified quota was not returned for the dashboard and its restart cache")
+	}
+	purchase.QuotaVerified = false
+	if result := skillStoragePurchaseResult(purchase, nil); result.OK || result.Storage != nil {
+		t.Fatal("unverified quota was published as a completed purchase")
+	}
+}

@@ -97,11 +97,35 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 			return nil, err
 		}
 	}
+	if l.storeCommerce.NeedsReauthentication() {
+		if err := l.saveStorePurchaseSession(); err != nil {
+			return nil, &icloud.StorageError{Stage: "purchase-store-checkpoint-save"}
+		}
+	}
 	if restored, err := l.RestoreStorePurchaseSession(ctx); err != nil {
 		return nil, err
 	} else if restored {
 		return &icloud.StoreAuthenticationInfo{Ready: true}, nil
 	}
+	return l.authenticateSkillStoragePurchaseSession(ctx, codeProvider)
+}
+
+// RefreshSkillStoragePurchaseSession performs a new Store authentication,
+// preserving only same-account machine provisioning. It never buys anything.
+func (l *Login) RefreshSkillStoragePurchaseSession(ctx context.Context, codeProvider func() (string, error)) (*icloud.StoreAuthenticationInfo, error) {
+	if l.needsTwoFactor || l.client == nil {
+		return nil, &icloud.StorageError{Stage: "purchase-account-authentication-required"}
+	}
+	if l.storeCommerce != nil {
+		l.storeCommerce.InvalidateFrameworkStoreSession()
+		if err := l.saveStorePurchaseSession(); err != nil {
+			return nil, &icloud.StorageError{Stage: "purchase-store-checkpoint-save"}
+		}
+	}
+	return l.authenticateSkillStoragePurchaseSession(ctx, codeProvider)
+}
+
+func (l *Login) authenticateSkillStoragePurchaseSession(ctx context.Context, codeProvider func() (string, error)) (*icloud.StoreAuthenticationInfo, error) {
 	if l.creds.Password == "" {
 		return nil, &icloud.StorageError{Stage: "purchase-store-reconnect-required"}
 	}
@@ -122,13 +146,20 @@ func (l *Login) CheckSkillStoragePurchaseSession(ctx context.Context, codeProvid
 
 // SubmitSkillStoragePurchase submits one exact allowlisted offer, then
 // verifies both Apple's subscription detail and a fresh paid quota read.
-func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseTarget, expectedTerms string) (*PurchaseResult, error) {
+func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseTarget, expectedTerms string) (result *PurchaseResult, err error) {
 	if l.needsTwoFactor || l.client == nil {
 		return nil, &icloud.StorageError{Stage: "purchase-account-authentication-required"}
 	}
 	if !l.storeCommerce.MatchesAccount(l.client.DSID) {
 		return nil, &icloud.StorageError{Stage: "purchase-store-session", Hint: "local-session-unavailable"}
 	}
+	defer func() {
+		if l.storeCommerce.NeedsReauthentication() {
+			if saveErr := l.saveStorePurchaseSession(); saveErr != nil {
+				err = &icloud.StorageError{Stage: "purchase-store-checkpoint-save"}
+			}
+		}
+	}()
 	before, err := l.storeCommerce.ReadSkillSubscription(ctx)
 	if err != nil {
 		return nil, err
@@ -140,7 +171,7 @@ func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseT
 	if err != nil {
 		return nil, err
 	}
-	result, err := l.storeCommerce.SubmitSkillPurchase(ctx, plans, target, expectedTerms)
+	result, err = l.storeCommerce.SubmitSkillPurchase(ctx, plans, target, expectedTerms)
 	if err != nil || result == nil || result.State != "completed" {
 		return result, err
 	}
@@ -152,6 +183,7 @@ func (l *Login) SubmitSkillStoragePurchase(ctx context.Context, target PurchaseT
 		quota, quotaErr := l.StorageInfo(ctx)
 		if quotaErr == nil && quota.TotalBytes >= target.Bytes && quota.PaidBytes >= target.Bytes {
 			result.QuotaVerified = true
+			result.VerifiedStorage = quota
 			return result, nil
 		}
 		select {

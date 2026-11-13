@@ -460,7 +460,7 @@ func (s *StoreCommerceSession) skillRequest(ctx context.Context, method, endpoin
 	}
 	if resp.StatusCode != 200 {
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			s.identity = nil
+			s.invalidateCommerceSession()
 		}
 		return data, resp.StatusCode, &StorageError{Stage: "purchase-skill-response", HTTPStatus: resp.StatusCode}
 	}
@@ -468,6 +468,9 @@ func (s *StoreCommerceSession) skillRequest(ctx context.Context, method, endpoin
 }
 
 func (s *StoreCommerceSession) skillBuy(ctx context.Context, q url.Values) (map[string]any, error) {
+	if s == nil || s.identity == nil || !s.MatchesAccount(s.identity.DSID) {
+		return nil, &StorageError{Stage: "purchase-store-session"}
+	}
 	values := map[string]any{}
 	for key, vs := range q {
 		if len(vs) != 1 {
@@ -509,6 +512,9 @@ func (s *StoreCommerceSession) skillBuy(ctx context.Context, q url.Values) (map[
 // SubmitSkillPurchase sends the skill's native offer, and at most one exact
 // Apple-issued auto-renew confirmation. It never uses presentOffers POST.
 func (s *StoreCommerceSession) SubmitSkillPurchase(ctx context.Context, info *StoragePlanInfo, target PurchaseTarget, expectedTerms string) (*PurchaseResult, error) {
+	if s == nil || s.identity == nil || !s.MatchesAccount(s.identity.DSID) {
+		return nil, &StorageError{Stage: "purchase-store-session"}
+	}
 	if err := ValidatePurchaseTarget(info, target); err != nil {
 		return nil, err
 	}
@@ -537,7 +543,7 @@ func (s *StoreCommerceSession) SubmitSkillPurchase(ctx context.Context, info *St
 			return nil, err
 		}
 	}
-	if err := skillPurchaseRejection(r); err != nil {
+	if err := s.checkSkillPurchaseRejection(r); err != nil {
 		return nil, err
 	}
 	if dialog, ok := r["dialog"].(map[string]any); ok {
@@ -563,13 +569,22 @@ func (s *StoreCommerceSession) SubmitSkillPurchase(ctx context.Context, info *St
 			return nil, err
 		}
 	}
-	if err := skillPurchaseRejection(r); err != nil {
+	if err := s.checkSkillPurchaseRejection(r); err != nil {
 		return nil, err
 	}
 	if r["jingleDocType"] == "purchaseSuccess" && r["jingleAction"] == "purchaseProduct" && fmt.Sprint(r["status"]) == "0" {
 		return &PurchaseResult{State: "completed", HTTPStatus: 200}, nil
 	}
 	return &PurchaseResult{State: "verification-pending", HTTPStatus: 200}, nil
+}
+
+func (s *StoreCommerceSession) checkSkillPurchaseRejection(response map[string]any) error {
+	err := skillPurchaseRejection(response)
+	var failure *StorageError
+	if errors.As(err, &failure) && failure.Stage == "purchase-store-token-expired" {
+		s.invalidateCommerceSession()
+	}
+	return err
 }
 
 // Retain only a numeric failure code and a coarse category. Messages, dialog
@@ -584,6 +599,11 @@ func skillPurchaseRejection(response map[string]any) error {
 		if _, err := strconv.ParseInt(raw, 10, 32); err == nil {
 			code = raw
 		}
+	}
+	// The pinned native Store client defines 2034 as PasswordTokenExpired.
+	// A successful subscription-list read does not override a purchase rejection.
+	if code == "2034" {
+		return &StorageError{Stage: "purchase-store-token-expired", HTTPStatus: 200, AppleCode: code, Hint: "sign-in-required"}
 	}
 	var messages []string
 	for _, key := range []string{"customerMessage", "failureMessage"} {

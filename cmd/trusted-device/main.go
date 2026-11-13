@@ -903,14 +903,14 @@ func run() (runErr error) {
 		}
 		if action == "storage-skill-auth-local" {
 			checker, ok := active.(interface {
-				CheckSkillStoragePurchaseSession(context.Context, func() (string, error)) (*icloud.StoreAuthenticationInfo, error)
+				RefreshSkillStoragePurchaseSession(context.Context, func() (string, error)) (*icloud.StoreAuthenticationInfo, error)
 			})
 			if !ok {
 				return control.Result{Message: "后台版本不支持匹配 Store bag 的认证", Stage: "worker"}
 			}
 			queryCtx, done := context.WithTimeout(actionCtx, 3*time.Minute)
 			defer done()
-			info, err := checker.CheckSkillStoragePurchaseSession(queryCtx, func() (string, error) {
+			info, err := checker.RefreshSkillStoragePurchaseSession(queryCtx, func() (string, error) {
 				return generateCode(queryCtx)
 			})
 			if err != nil {
@@ -921,7 +921,7 @@ func run() (runErr error) {
 				}
 				return result
 			}
-			return control.Result{OK: true, Message: "匹配 Store bag 的认证已通过；未提交购买", StoreAuthentication: info}
+			return control.Result{OK: true, Message: "购买会话已重新认证；未提交购买", StoreAuthentication: info}
 		}
 		if action == "storage-skill-auth-file" {
 			checker, ok := active.(interface {

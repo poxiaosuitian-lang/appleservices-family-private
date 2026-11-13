@@ -388,10 +388,28 @@ type StoreCommerceSession struct {
 	frameworkEmail      string
 	frameworkGUID       string
 	frameworkCheckpoint []byte // credentials; exported only to an encrypted local store
+	tokenRejected       bool
 }
 
 func (s *StoreCommerceSession) MatchesAccount(dsid string) bool {
-	return s != nil && s.client != nil && s.identity != nil && dsid != "" && s.identity.DSID == dsid && s.identity.PasswordToken != ""
+	return s != nil && !s.tokenRejected && s.client != nil && s.identity != nil && dsid != "" && s.identity.DSID == dsid && s.identity.PasswordToken != ""
+}
+
+// NeedsReauthentication distinguishes Apple-rejected commerce credentials from
+// an absent session. A saved copy of the rejected token must not be restored.
+func (s *StoreCommerceSession) NeedsReauthentication() bool {
+	return s != nil && s.tokenRejected
+}
+
+func (s *StoreCommerceSession) invalidateCommerceSession() {
+	if s == nil {
+		return
+	}
+	s.identity = nil
+	s.tokenRejected = true
+	clear(s.frameworkCheckpoint)
+	s.frameworkCheckpoint = nil
+	// Keep only the same-account framework machine state for a fresh login.
 }
 
 // storeProxyTransport returns a transport that routes store traffic through

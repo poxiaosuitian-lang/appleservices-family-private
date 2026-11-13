@@ -26,23 +26,24 @@ const frameworkStoreAgent = "Configurator/2.21 (Macintosh; OS X 27.0.1; 26A434) 
 const maxHelperMessage = 1024 * 1024
 
 type storeAuthMessage struct {
-	Version      int                `json:"version"`
-	Type         string             `json:"type"`
-	Email        string             `json:"email,omitempty"`
-	Password     string             `json:"password,omitempty"`
-	MACAddress   string             `json:"mac_address,omitempty"`
-	ExpectedDSID string             `json:"expected_dsid,omitempty"`
-	State        []byte             `json:"state,omitempty"`
-	Code         string             `json:"code,omitempty"`
-	OK           bool               `json:"ok,omitempty"`
-	DSID         string             `json:"dsid,omitempty"`
-	Token        string             `json:"token,omitempty"`
-	Storefront   string             `json:"storefront,omitempty"`
-	Pod          string             `json:"pod,omitempty"`
-	GUID         string             `json:"guid,omitempty"`
-	Cookies      []storeAuthCookies `json:"cookies,omitempty"`
-	Stage        string             `json:"stage,omitempty"`
-	HTTPStatus   int                `json:"http_status,omitempty"`
+	Version                  int                `json:"version"`
+	Type                     string             `json:"type"`
+	Email                    string             `json:"email,omitempty"`
+	Password                 string             `json:"password,omitempty"`
+	MACAddress               string             `json:"mac_address,omitempty"`
+	ExpectedDSID             string             `json:"expected_dsid,omitempty"`
+	State                    []byte             `json:"state,omitempty"`
+	Code                     string             `json:"code,omitempty"`
+	OK                       bool               `json:"ok,omitempty"`
+	DSID                     string             `json:"dsid,omitempty"`
+	Token                    string             `json:"token,omitempty"`
+	Storefront               string             `json:"storefront,omitempty"`
+	Pod                      string             `json:"pod,omitempty"`
+	GUID                     string             `json:"guid,omitempty"`
+	Cookies                  []storeAuthCookies `json:"cookies,omitempty"`
+	Stage                    string             `json:"stage,omitempty"`
+	HTTPStatus               int                `json:"http_status,omitempty"`
+	ReauthenticationRequired bool               `json:"reauthentication_required,omitempty"`
 }
 
 type storeAuthCookies struct {
@@ -55,6 +56,14 @@ type storeAuthCookies struct {
 func (s *StoreCommerceSession) CanReuseFrameworkState(appleID, expectedDSID string) bool {
 	return s != nil && len(s.frameworkState) > 0 && expectedDSID != "" &&
 		s.frameworkDSID == expectedDSID && strings.EqualFold(s.frameworkEmail, appleID)
+}
+
+// InvalidateFrameworkStoreSession discards a commerce login while retaining
+// its account-bound provisioning for an explicit fresh authentication.
+func (s *StoreCommerceSession) InvalidateFrameworkStoreSession() {
+	if s != nil {
+		s.invalidateCommerceSession()
+	}
 }
 
 // AuthenticateFrameworkStore runs the pinned native framework implementation in
@@ -272,6 +281,13 @@ func importFrameworkSession(result *storeAuthMessage, email, expectedDSID, guid 
 // PrivateCheckpoint contains authentication tokens. Callers must encrypt it
 // with the operating system; it is never a UI/API response or a log value.
 func (s *StoreCommerceSession) PrivateCheckpoint(appleID, dsid string) ([]byte, error) {
+	if s != nil && s.NeedsReauthentication() && dsid != "" && s.frameworkDSID == dsid && strings.EqualFold(s.frameworkEmail, appleID) && s.frameworkGUID != "" {
+		// A rejected token must never be resurrected after a restart. Preserve
+		// only the account-bound machine provisioning needed for a fresh login.
+		return json.Marshal(storeAuthMessage{Version: 1, Type: "result", OK: true,
+			Email: s.frameworkEmail, DSID: s.frameworkDSID, GUID: s.frameworkGUID,
+			State: s.frameworkState, ReauthenticationRequired: true})
+	}
 	if !s.MatchesAccount(dsid) || !strings.EqualFold(s.frameworkEmail, appleID) || len(s.frameworkCheckpoint) == 0 {
 		return nil, &StorageError{Stage: "purchase-store-checkpoint-binding"}
 	}
@@ -285,9 +301,22 @@ func RestoreFrameworkStore(data []byte, appleID, dsid string) (*StoreCommerceSes
 	if err != nil {
 		return nil, &StorageError{Stage: "purchase-store-physical-hardware"}
 	}
+	return restoreFrameworkCheckpoint(data, appleID, dsid, guid)
+}
+
+func restoreFrameworkCheckpoint(data []byte, appleID, dsid, guid string) (*StoreCommerceSession, error) {
 	var result storeAuthMessage
 	if len(data) == 0 || len(data) > maxHelperMessage || json.Unmarshal(data, &result) != nil || result.Password != "" || result.Code != "" {
 		return nil, &StorageError{Stage: "purchase-store-checkpoint-invalid"}
+	}
+	if result.ReauthenticationRequired {
+		if result.Version != 1 || result.Type != "result" || !result.OK || dsid == "" || result.DSID != dsid ||
+			!regexp.MustCompile(`^\d+$`).MatchString(result.DSID) || !strings.EqualFold(result.Email, appleID) || result.GUID != guid ||
+			result.Token != "" || len(result.Cookies) != 0 || result.Storefront != "" || result.Pod != "" || len(result.State) > maxHelperMessage/2 {
+			return nil, &StorageError{Stage: "purchase-store-checkpoint-binding"}
+		}
+		return &StoreCommerceSession{tokenRejected: true, frameworkState: append([]byte(nil), result.State...),
+			frameworkDSID: result.DSID, frameworkEmail: result.Email, frameworkGUID: result.GUID}, nil
 	}
 	return importFrameworkSession(&result, appleID, dsid, guid)
 }

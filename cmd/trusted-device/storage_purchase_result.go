@@ -24,6 +24,8 @@ func skillStoragePurchaseResult(purchase *icloud.PurchaseResult, err error) cont
 				result.Message = "请先完成账户登录与验证；未提交购买"
 			case "purchase-store-session":
 				result.Message = "购买会话不可用或已随登录续期重置，请重新验证购买会话；未提交购买"
+			case "purchase-store-token-expired":
+				result.Message = "Apple 要求重新认证购买会话；请重新检查后再确认开通"
 			case "purchase-existing-subscription":
 				result.Message = "Apple 已返回现有 iCloud+ 订阅，已阻止重复购买；请核对订阅和容量"
 			case "purchase-subscription-verification", "purchase-quota-verification":
@@ -43,6 +45,7 @@ func skillStoragePurchaseResult(purchase *icloud.PurchaseResult, err error) cont
 	}
 	if purchase.State == "completed" && purchase.QuotaVerified {
 		result.OK, result.Message, result.Stage = true, "50GB 订阅和付费配额均已核验", "purchase-completed"
+		result.Storage = purchase.VerifiedStorage
 		return result
 	}
 	switch purchase.State {
