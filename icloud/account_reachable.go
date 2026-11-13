@@ -3,8 +3,6 @@ package icloud
 import (
 	"bytes"
 	"context"
-	"crypto/pbkdf2"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -286,8 +284,7 @@ func (c *AppleAccountClient) Authenticate(ctx context.Context, password string, 
 	if saltErr != nil || bErr != nil {
 		return errors.New("Apple Account SRP challenge encoding was invalid")
 	}
-	passwordHash := sha256.Sum256([]byte(password))
-	passwordKey, keyErr := pbkdf2.Key(sha256.New, string(passwordHash[:]), salt, challenge.Iteration, 32)
+	passwordKey, keyErr := deriveWebPasswordKey(password, challenge.Protocol, salt, challenge.Iteration)
 	if keyErr != nil {
 		return keyErr
 	}

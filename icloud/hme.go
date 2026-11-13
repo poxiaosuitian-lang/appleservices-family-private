@@ -3,9 +3,7 @@ package icloud
 import (
 	"bytes"
 	"context"
-	"crypto/pbkdf2"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -183,6 +181,7 @@ func (c *HideMyEmailClient) saveSession() error {
 }
 
 type hmeAuthState struct {
+	fdClientInfo                   string
 	frameID, clientID, srpSession  string
 	authAttributes, sessionID      string
 	scnt, sessionToken, trustToken string
@@ -237,11 +236,16 @@ func (c *HideMyEmailClient) authHeaders(state *hmeAuthState) http.Header {
 	h.Set("X-Apple-Locale", "zh_CN")
 	h.Set("X-Apple-Offer-Security-Upgrade", "1")
 	h.Set("X-Apple-Privacy-Consent", "true")
-	h.Set("X-Apple-I-FD-Client-Info", hmeFDClientInfo())
+	if state.fdClientInfo == "" {
+		state.fdClientInfo = hmeFDClientInfo()
+	}
+	h.Set("X-Apple-I-FD-Client-Info", state.fdClientInfo)
 	h.Set("X-Requested-With", "XMLHttpRequest")
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
-	h.Set("Origin", c.authBase)
+	if authURL, err := url.Parse(c.authBase); err == nil {
+		h.Set("Origin", authURL.Scheme+"://"+authURL.Host)
+	}
 	h.Set("Referer", c.authBase+"/")
 	h.Set("User-Agent", hmeWebUserAgent)
 	return h
@@ -313,8 +317,8 @@ func (c *HideMyEmailClient) authenticate(ctx context.Context, password string, c
 		return errors.New("hide my email web login requires the current account password")
 	}
 	c.resetHTTP()
-	state := &hmeAuthState{frameID: randomHex(16), clientID: hmeOAuthClient}
-	query := url.Values{"frame_id": {"auth-" + state.frameID}, "language": {"en_US"}, "skVersion": {"7"}, "iframeId": {"auth-" + state.frameID}, "client_id": {state.clientID}, "redirect_uri": {"https://www.icloud.com"}, "response_type": {"code"}, "response_mode": {"web_message"}, "state": {"auth-" + state.frameID}, "authVersion": {"latest"}}
+	state := &hmeAuthState{frameID: "auth-" + randomHex(16), clientID: hmeOAuthClient}
+	query := url.Values{"frame_id": {state.frameID}, "language": {"en_US"}, "skVersion": {"7"}, "iframeId": {state.frameID}, "client_id": {state.clientID}, "redirect_uri": {"https://www.icloud.com"}, "response_type": {"code"}, "response_mode": {"web_message"}, "state": {state.frameID}, "authVersion": {"latest"}}
 	startHeaders := make(http.Header)
 	startHeaders.Set("Accept", "*/*")
 	startHeaders.Set("User-Agent", hmeWebUserAgent)
@@ -333,8 +337,11 @@ func (c *HideMyEmailClient) authenticate(ctx context.Context, password string, c
 	srpClient := srp.NewClient(params, c.appleID)
 	initBody, _ := json.Marshal(map[string]any{"a": base64.StdEncoding.EncodeToString(srpClient.PublicA().Bytes()), "accountName": c.appleID, "protocols": []string{"s2k", "s2k_fo"}})
 	response, initData, err := c.authRequest(ctx, state, http.MethodPost, c.authBase+"/signin/init", initBody, c.authHeaders(state))
-	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+	if err != nil {
 		return errors.New("Apple web SRP challenge failed")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("SRP init: %w", primaryMailLoginError(response.StatusCode, initData))
 	}
 	var challenge struct {
 		Iteration            int `json:"iteration"`
@@ -349,8 +356,7 @@ func (c *HideMyEmailClient) authenticate(ctx context.Context, password string, c
 	if saltErr != nil || bErr != nil {
 		return errors.New("Apple web SRP challenge encoding was invalid")
 	}
-	passwordHash := sha256.Sum256([]byte(password))
-	passwordKey, keyErr := pbkdf2.Key(sha256.New, string(passwordHash[:]), salt, challenge.Iteration, 32)
+	passwordKey, keyErr := deriveWebPasswordKey(password, challenge.Protocol, salt, challenge.Iteration)
 	if keyErr != nil {
 		return keyErr
 	}

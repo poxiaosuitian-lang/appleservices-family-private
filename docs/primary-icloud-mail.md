@@ -16,6 +16,10 @@ Apple 的[创建主要邮件地址说明](https://support.apple.com/zh-cn/guide/
 
 网页 SRP、受信任设备验证复用现有认证实现，但邮箱独立保存 `primary-mail-session.json`，不复用隐藏邮件地址的资格限制。未知挑战、缺少安全问题答案、条款和 Apple 限制会显示为待处理，不冒充已完成。网页里完成验证不会直接向本程序转移浏览器 cookie；必要时需重新连接，让本程序重新建立会话。
 
+网页认证按 Apple 返回的 SRP 协议派生密码证明：`s2k` 使用 SHA-256 原始摘要，`s2k_fo` 使用摘要的小写十六进制文本，再执行 PBKDF2。不能把两种协议都按 `s2k` 处理，否则正确密码也可能得到 HTTP 401。账号管理网页共用该派生实现；未知协议或异常迭代次数会停止认证，不提交密码证明。兼容性参考 [PyiCloud SRP 实现](https://pyicloud.readthedocs.io/en/2026.10.0/api/pyicloud-service/)。
+
+一次网页登录的授权查询参数和后续请求头使用相同的 frame/state 标识，客户端信息在该次握手中保持一致；Origin 仅包含协议和主机。SRP 初始化的非成功响应只报告阶段、HTTP 状态和数字错误码，不记录认证响应内容。
+
 遇到网页登录完成阶段返回 `HTTP 412`、`authType=sa` 时，程序读取具体题目并使用[本机加密保存的安全问题答案](security-questions.md)完成验证。缺少答案时在面板填写后继续；不将其误报为密码错误。正常的设备登录可继续保持在线。
 
 ## 重启与不确定结果
@@ -29,3 +33,5 @@ Apple 的[创建主要邮件地址说明](https://support.apple.com/zh-cn/guide/
 `go test ./icloud ./cmd/trusted-device ./internal/dashboard ./internal/control ./internal/mailsetup` 覆盖已有邮箱跳过、名称占用、账号绑定、响应缺失、创建前落盘失败、丢失响应回读及跨进程防重提。`tools/test-primary-mail-ui.cjs` 使用离线页面/接口夹具检查面板状态与交互。
 
 这些测试不等于真实新账号入箱验收。Apple 私有网页接口可能变化；新账号实际创建还取决于 Apple 接受网页认证及该账号的开通资格。
+
+2026-11-14 只读实测：对已经在官网创建邮箱的授权账号，修复后的网页认证进入双重验证，本机设备码通过；随后查询确认 mail 服务存在。另一次由运行中面板发起的“检查邮箱”复用了保存的网页会话，状态更新为 ready。未调用邮箱创建、购买或兑换接口；未完成新版后台重启验收。
