@@ -6,7 +6,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const web = path.join(__dirname, '../internal/dashboard/web');
 const GiB = 1024 ** 3;
 const quota = paid => ({total_bytes:(paid || 5)*GiB,paid_bytes:paid*GiB,used_bytes:0,available_bytes:(paid || 5)*GiB});
-async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purchaseExpired=false}={}, check) {
+async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purchaseExpired=false, giftFailure=false, giftDisconnect=false}={}, check) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const calls=[], errors=[], actionAccounts=[];
@@ -40,9 +40,10 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
       if(action==='gift-prepare')result={ok:true,message:'兑换会话已核验',gift_card:{ready:true,state:'prepared',preparation_id:'fixture-preparation'}};
       else if(action==='gift-redeem'){
         const submitted=route.request().postDataJSON();
-        assert.equal(submitted.request_id,'fixture-preparation');assert.equal(submitted.code,'X000000000000000');
+        assert.equal(submitted.request_id,undefined);assert.equal(submitted.code,'X000000000000000');
         assert.equal(await page.locator('#giftCode').inputValue(),'');
-        result={ok:true,message:'Apple 已确认入账',gift_card:{state:'completed',credited:'$5.00',balance:'$5.00'}};
+        if(giftDisconnect)return route.abort();
+        result=giftFailure?{ok:false,message:'兑换检查未通过，尚未提交兑换',gift_card:{state:'not-submitted'}}:{ok:true,message:'Apple 已确认入账',gift_card:{state:'completed',credited:'$5.00',balance:'$5.00'}};
       }
       else if(action==='storage-info'){view.storage=quota(discovered);view.storage_checked_at=new Date().toISOString();result={ok:true,storage:view.storage};}
       else if(action==='storage-purchase-prepare-us'){
@@ -121,19 +122,29 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
       assert.notEqual(await p.locator('#purchaseButton').innerText(),'iCloud+ 已开通');
     });
     await scenario(browser,{},async(p,c)=>{
-      assert(await p.locator('#giftCode').isDisabled());
-      await p.locator('#giftPrepareButton').click();
-      await p.waitForFunction(()=>!document.getElementById('giftCode').disabled);
+      assert.equal(await p.locator('#giftPrepareButton').count(),0);
+      assert(await p.locator('#giftCode').isEnabled());
+      assert.equal(await p.locator('#giftRedeemButton').innerText(),'确认兑换');
       await p.locator('#giftCode').fill('X000000000000000');
       p.once('dialog',d=>d.dismiss());await p.locator('#giftRedeemButton').click();
-      assert.deepEqual(c,['gift-prepare']);
+      assert.deepEqual(c,[]);
       p.once('dialog',d=>d.accept());await p.locator('#giftRedeemButton').click();
       await p.waitForFunction(()=>document.getElementById('giftResult').textContent.includes('余额 $5.00'));
-      assert.deepEqual(c,['gift-prepare','gift-redeem']);
+      assert.deepEqual(c,['gift-redeem']);
       assert(await p.locator('#giftRedeemButton').isDisabled());
       await p.reload();await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
-      assert.equal(await p.locator('#giftCode').inputValue(),'');assert(await p.locator('#giftCode').isDisabled());
+      assert.equal(await p.locator('#giftCode').inputValue(),'');assert(await p.locator('#giftCode').isEnabled());
     });
+    for(const giftDisconnect of [false,true]){
+      await scenario(browser,{giftFailure:true,giftDisconnect},async(p,c)=>{
+        await p.locator('#giftCode').fill('X000000000000000');
+        p.once('dialog',d=>d.accept());await p.locator('#giftRedeemButton').click();
+        await p.waitForFunction(expected=>document.getElementById('giftResult').textContent.includes(expected),giftDisconnect?'兑换结果未确认':'尚未提交兑换');
+        await p.waitForFunction(()=>!document.body.classList.contains('busy'));
+        assert.deepEqual(c,['gift-redeem']);
+        assert.equal(await p.locator('#giftCode').inputValue(),'');
+      });
+    }
     for(const remember of [false,true]){
       await scenario(browser,{},async(p,c)=>{
         await p.evaluate(()=>openLogin('add'));
@@ -149,25 +160,26 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
       });
     }
     await scenario(browser,{paid:50},async(p,c,targets)=>{
-      // Start with a different account's paid plan and prepared redemption.
+      // Switching accounts must clear the old account's unsubmitted card code.
       assert(await p.locator('#purchaseButton').isDisabled());
-      await p.locator('#giftPrepareButton').click();
-      await p.waitForFunction(()=>!document.getElementById('giftCode').disabled);
+      await p.locator('#giftCode').fill('X000000000000000');
       await p.evaluate(()=>openLogin('add'));
       await p.locator('#appleID').fill('owner@example.test');
       await p.locator('#password').fill('synthetic-ui-password');
       await p.locator('#loginForm button[type=submit]').click();
       await p.waitForFunction(()=>!document.getElementById('loginDialog').open&&!document.getElementById('purchaseButton').disabled);
       assert.equal(await p.evaluate(()=>localStorage.getItem('selected-account')),'fixture-new');
-      assert(await p.locator('#giftCode').isDisabled(),'old account redemption preparation must be cleared');
-      await p.locator('#giftPrepareButton').click();
-      await p.waitForFunction(()=>!document.getElementById('giftCode').disabled);
+      assert.equal(await p.locator('#giftCode').inputValue(),'','old account code must be cleared');
+      await p.locator('#giftCode').fill('X000000000000000');
+      p.once('dialog',d=>d.accept());
+      await p.locator('#giftRedeemButton').click();
+      await p.waitForFunction(()=>document.getElementById('giftResult').textContent.includes('余额 $5.00'));
+      await p.waitForFunction(()=>!document.getElementById('purchaseButton').disabled);
       p.on('dialog',d=>d.accept());
       await p.locator('#purchaseButton').click();
       await p.waitForFunction(()=>document.getElementById('purchaseButton').textContent==='iCloud+ 已开通');
       assert.deepEqual(targets,[
-        {action:'gift-prepare',account:'fixture'},
-        {action:'gift-prepare',account:'fixture-new'},
+        {action:'gift-redeem',account:'fixture-new'},
         {action:'storage-purchase-prepare-us',account:'fixture-new'},
         {action:'storage-skill-purchase-us',account:'fixture-new'},
       ]);

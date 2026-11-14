@@ -954,10 +954,7 @@ func run() (runErr error) {
 		}
 
 		if action == "gift-prepare" || action == "gift-redeem" {
-			redeemer, ok := active.(interface {
-				PrepareGiftCard(context.Context, func() (string, error)) (*icloud.GiftCardInfo, error)
-				RedeemGiftCard(context.Context, string, string) (*icloud.GiftCardInfo, error)
-			})
+			redeemer, ok := active.(giftCardRedeemer)
 			if !ok {
 				return control.Result{Message: "请重新连接账号加载兑换协议", Stage: "worker-upgrade-required"}
 			}
@@ -968,9 +965,12 @@ func run() (runErr error) {
 			if action == "gift-prepare" {
 				info, err = redeemer.PrepareGiftCard(queryCtx, func() (string, error) { return generateCode(queryCtx) })
 			} else {
-				info, err = redeemer.RedeemGiftCard(queryCtx, visibleRequestID, commandCode)
+				info, err = redeemPreparedGiftCard(queryCtx, redeemer, visibleRequestID, commandCode, func() (string, error) { return generateCode(queryCtx) })
 			}
 			result := control.Result{GiftCard: info, Stage: "gift-result", Message: "兑换未确认，请核对官方账户余额；不会自动重试"}
+			if info != nil && info.State == "not-submitted" {
+				result.Message = "兑换检查未通过，尚未提交兑换"
+			}
 			if err != nil {
 				var failure *icloud.StorageError
 				if errors.As(err, &failure) {

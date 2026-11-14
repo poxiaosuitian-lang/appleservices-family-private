@@ -1940,11 +1940,6 @@ input[readonly] {
   gap: 8px;
 }
 
-.gift-controls-row > #giftPrepareButton {
-  height: 38px;
-  flex-shrink: 0;
-}
-
 #giftRedeemForm {
   margin: 0;
   flex: 1;
@@ -3346,9 +3341,6 @@ body.ui-ready .lower-grid {
   .gift-controls-row {
     flex-direction: column;
     align-items: stretch;
-  }
-  .gift-controls-row > #giftPrepareButton {
-    width: 100%;
   }
   .icloud-steps {
     width: 100%;

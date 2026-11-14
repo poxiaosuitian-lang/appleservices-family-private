@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id), token = document.querySelector('meta[name="app-token"]').content;
 let loginMode = 'reconnect', loginAccount = '', current = null, busy = false, privateCode = '', privateCodeKind = '', hideAt = 0, codeTotalMs = 60000, lastState = '', lastQuery = '', lastRefresh = '', lastRequest = '', noticeTimer, selectedAccount = localStorage.getItem('selected-account') || '', familyInfo = null, familyAccount = '', familyCheckedAt = '', familyStale = false, storageAccount = '', storageCheckedAt = '', planAccount = '', planCheckedAt = '', poolOrganizerAccount = localStorage.getItem('family-organizer-account') || '', poolOrganizerName = localStorage.getItem('family-organizer-name') || '', purchaseAction = '', purchaseLabel = '', hmeInfo = null, hmeAccount = '', hmeCandidate = '', hmeFilter = 'active', hmeVisible = 100, hmeEditing = '', activationInfo = null, activationAccount = '', autoRefreshScheduled = false;
 let storeAuthReady = false, storeAuthAccount = '', storeAuthPID = 0, storeAuthRefresh = '';
-let giftPreparation = '', giftOwner = '', giftPID = 0;
+let giftOwner = '', giftPID = 0;
 let verificationContext = '';
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -728,15 +728,14 @@ function render(view) {
   }
 
   if (giftOwner !== selectedAccount || giftPID !== (status.pid || 0) || !online) {
-    giftPreparation = '';
     $('giftCode').value = '';
     $('giftResult').textContent = '';
     giftOwner = selectedAccount;
     giftPID = status.pid || 0;
   }
-  $('giftPrepareButton').disabled = busy || !online || !view.control_ready || !view.gift_card_available;
-  $('giftCode').disabled = busy || !giftPreparation;
-  $('giftRedeemButton').disabled = busy || !online || !view.control_ready || !giftPreparation || !/^X[A-Z0-9]{15}$/.test($('giftCode').value.trim().toUpperCase());
+  const giftUnavailable = busy || !online || !view.control_ready || !view.gift_card_available;
+  $('giftCode').disabled = giftUnavailable;
+  $('giftRedeemButton').disabled = giftUnavailable || !/^X[A-Z0-9]{15}$/.test($('giftCode').value.trim().toUpperCase());
   if (online && !view.gift_card_available) $('giftResult').textContent = '请重新连接当前账号';
 
   const titles = {
@@ -983,6 +982,7 @@ async function action(name, extra = {}, options = {}) {
   }
   const actionAccount = selectedAccount, actionPID = current?.status?.pid || 0, actionRefresh = current?.status?.last_refresh_at || '', actionVerificationContext = verificationContext;
   const familyAction = name.startsWith('family-'), hmeAction = name.startsWith('hme-');
+  let giftResponseReceived = false;
   busy = true;
   document.body.classList.add('busy');
   if (familyAction) $('familyCard').classList.add('is-loading');
@@ -1000,11 +1000,8 @@ async function action(name, extra = {}, options = {}) {
       $('purchaseResult').hidden = false;
     }
     if (name.startsWith('gift-') && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0)) {
+      giftResponseReceived = true;
       const gift = result.gift_card;
-      if (name === 'gift-prepare' && result.ok && gift?.ready) {
-        giftPreparation = gift.preparation_id || '';
-        $('giftCode').placeholder = '16 位充值礼品卡代码';
-      }
       $('giftResult').textContent = (result.message || '兑换结果未确认') + (gift?.state === 'completed' ? ' · 入账 ' + gift.credited + ' · 余额 ' + gift.balance : '') + (result.apple_code ? ' · Apple 错误码 ' + result.apple_code : '');
     }
     const purchaseRequest = ['storage-purchase', 'storage-skill-purchase-us'].includes(name);
@@ -1035,7 +1032,6 @@ async function action(name, extra = {}, options = {}) {
       if (['purchase-store-session', 'purchase-store-token-expired'].includes(result.stage)) {
         storeAuthReady = false;
         if (current && actionAccount === selectedAccount) current.store_session_ready = false;
-        giftPreparation = '';
         $('storeAuthSummary').textContent = '购买会话不可用，请重新验证购买会话。';
       }
       if (name === 'storage-skill-auth-local') {
@@ -1104,6 +1100,9 @@ async function action(name, extra = {}, options = {}) {
     return result;
   } catch (error) {
     if (options.autoKey) { autoRefreshState.set(options.autoKey, 'failed'); markAutoRefreshAttempt(options.autoKey, 'failed'); }
+    if (name === 'gift-redeem' && !giftResponseReceived && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0)) {
+      $('giftResult').textContent = '兑换结果未确认，请核对官方账户余额后再操作；不会自动重试。';
+    }
     if (!options.silent) notice(error.message, true);
   } finally {
     busy = false;
@@ -1224,25 +1223,16 @@ $('hmeEditForm').addEventListener('submit', event => {
   $('hmeEditDialog').close();
   action('hme-update', { code: email, label, note });
 });
-$('giftPrepareButton').addEventListener('click', () => {
-  if (busy) return;
-  giftPreparation = '';
-  $('giftCode').value = '';
-  $('giftResult').textContent = '正在验证兑换会话…';
-  action('gift-prepare');
-});
 $('giftCode').addEventListener('input', () => { if (current) render(current); });
 $('giftRedeemForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (busy || !giftPreparation) return;
+  if (busy || !current?.status?.running || !current?.status?.authenticated || !current?.control_ready || !current?.gift_card_available) return;
   const code = $('giftCode').value.trim().toUpperCase();
   if (!/^X[A-Z0-9]{15}$/.test(code)) return;
   if (!confirm('确认将这张充值礼品卡兑换到 ' + (current?.login_account || current?.account || '当前账号') + '？兑换码将被消耗；本次只提交兑换，不会自动购买订阅。')) return;
-  const preparation = giftPreparation;
-  giftPreparation = '';
   $('giftCode').value = '';
-  $('giftResult').textContent = '已发起单次兑换，正在等待 Apple 结果。结果不明时先核对官方余额，不要重复提交。';
-  await action('gift-redeem', { code, request_id: preparation });
+  $('giftResult').textContent = '正在检查兑换会话并提交兑换…';
+  await action('gift-redeem', { code });
 });
 $('paymentCheckButton').addEventListener('click', async () => {
   if (busy) return;
@@ -1270,7 +1260,6 @@ $('purchaseButton').addEventListener('click', async () => {
 $('storeAuthButton').addEventListener('click', () => {
   if (busy) return;
   storeAuthReady = false;
-  giftPreparation = '';
   if (current) current.store_session_ready = false;
   $('storeAuthSummary').textContent = '正在验证购买会话…';
   action('storage-skill-auth-local');
@@ -1322,7 +1311,7 @@ $('loginForm').addEventListener('submit', async event => {
       storageAccount = ''; storageCheckedAt = ''; planAccount = ''; planCheckedAt = '';
       purchaseAction = ''; purchaseLabel = ''; activationInfo = null; activationAccount = '';
       storeAuthReady = false; storeAuthAccount = ''; storeAuthPID = 0; storeAuthRefresh = '';
-      giftPreparation = ''; giftOwner = ''; giftPID = 0;
+      giftOwner = ''; giftPID = 0;
       clearCode(); resetHME(); renderFamily(null); renderStorage(null); renderPlans(null);
     }
     $('loginDialog').close();

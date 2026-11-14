@@ -12,6 +12,10 @@ Windows 可将已认证的 Store 会话用当前 Windows 用户的 DPAPI 加密�
 
 ## 调用顺序
 
+面板只有“确认兑换”：输入代码并确认账号后，发送一次 `gift-redeem`（无需 `request_id`）。后端先检查代码格式，自动执行以下准备步骤，取得一次性确认 ID 后立即提交一次兑换。准备失败时返回“尚未提交兑换”，不会发送兑换 POST。检查与兑换共用最长 170 秒的处理期限，控制接口等待 180 秒。
+
+旧客户端仍可显式分两步调用：
+
 1. `gift-prepare`：按需建立项目自己的 Store 会话，GET `https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/redeemLandingPage`。保留响应 Cookie，核对页面账号、兑换输入框和唯一的提交表单。
 2. 返回 `gift_card.preparation_id`，有效期五分钟，仅用于当前会话的一次确认。预检查不接收卡码，也不检查卡是否有效或读取余额。
 3. 用户确认后发送 `gift-redeem`，`code` 为充值礼品卡代码，`request_id` 为上一步的确认 ID。
