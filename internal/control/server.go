@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Laky-64/appleservices/icloud"
+	"github.com/Laky-64/appleservices/internal/apppassword"
 )
 
 type Record struct {
@@ -55,6 +56,7 @@ type Action struct {
 	Note            string                          `json:"note,omitempty"`
 }
 type Result struct {
+	AppPassword         *apppassword.Status             `json:"app_password,omitempty"`
 	AccountID           string                          `json:"account_id,omitempty"`
 	GiftCard            *icloud.GiftCardInfo            `json:"gift_card,omitempty"`
 	OK                  bool                            `json:"ok"`
@@ -207,13 +209,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action.Action {
 	case "mail-check", "mail-ensure", "security-save", "security-clear", "security-resume":
-	case "gift-prepare", "gift-redeem", "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-purchase-prepare-us", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
+	case "app-password-ensure", "app-password-save", "gift-prepare", "gift-redeem", "code", "devices", "refresh", "validate-account", "allow", "deny", "submit-sms", "resend-sms", "submit-account-code", "storage-info", "storage-plan", "storage-authenticate", "storage-skill-auth-local", "storage-purchase-prepare-us", "storage-skill-auth-file", "storage-skill-purchase-us", "storage-preview", "storage-purchase", "storage-probe", "storage-buy", "family-info", "family-add-self", "family-join-storage", "hme-list", "hme-accept-terms", "hme-generate", "hme-reserve", "hme-forward", "hme-reachable-start", "hme-reachable-verify", "hme-update", "hme-deactivate", "hme-reactivate", "hme-delete", "submit-pairing":
 	default:
 		http.Error(w, `{"message":"unknown action"}`, 400)
 		return
 	}
 	timeout := 90 * time.Second
-	if action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+	if strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 		timeout = 3 * time.Minute
 	} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") || strings.HasPrefix(action.Action, "mail-") {
 		timeout = 2 * time.Minute

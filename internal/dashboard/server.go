@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Laky-64/appleservices/icloud"
+	"github.com/Laky-64/appleservices/internal/apppassword"
 	"github.com/Laky-64/appleservices/internal/control"
 	"github.com/Laky-64/appleservices/internal/mailsetup"
 )
@@ -77,6 +78,7 @@ type Status struct {
 }
 type view struct {
 	SecurityQuestions            *icloud.SecurityQuestionsStatus `json:"security_questions,omitempty"`
+	AppPassword                  *apppassword.Status             `json:"app_password,omitempty"`
 	PrimaryMail                  *mailsetup.State                `json:"primary_mail,omitempty"`
 	GiftCardAvailable            bool                            `json:"gift_card_available"`
 	PurchasePreparationAvailable bool                            `json:"purchase_preparation_available"`
@@ -451,7 +453,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	request.Header.Set("Content-Type", "application/json")
 	timeout := 95 * time.Second
 	if action, ok := body.(control.Action); ok {
-		if action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+		if strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
 		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") || strings.HasPrefix(action.Action, "mail-") {
 			timeout = 2*time.Minute + 5*time.Second
@@ -792,6 +794,7 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 		result.Selected = account.ID
 		result.LoginAccount = account.AppleID
 		result.PrimaryMail, _ = mailsetup.Load(account.Dir, account.AppleID)
+		result.AppPassword, _ = apppassword.Load(account.Dir, account.AppleID)
 		result.SecurityQuestions = readSecurityQuestionsStatus(account)
 		result.ICloudActivated = acceptedCheckpointReady(account.Dir, account.AppleID)
 		result.ActivationReady = !result.ICloudActivated && verifiedGSACheckpointReady(account.Dir, account.AppleID)

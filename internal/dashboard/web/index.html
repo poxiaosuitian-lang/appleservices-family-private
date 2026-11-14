@@ -405,6 +405,18 @@
     <p id="purchaseResult" class="purchase-result-banner" role="status" hidden></p>
     <div id="planList" class="plan-list" hidden></div>
 
+    <div class="button-row">
+      <span id="appPasswordSummary" class="cache-note" role="status">应用专用密码：订阅后自动配置</span>
+      <button class="button button-light button-sm" type="button" id="appPasswordEnsure" disabled>配置应用专用密码</button>
+    </div>
+    <p id="appPasswordMessage" class="cache-note" role="status" hidden></p>
+    <form id="appPasswordForm" class="button-row" autocomplete="off" hidden>
+      <label class="sr-only" for="appPasswordInput">Apple 生成的应用专用密码</label>
+      <input id="appPasswordInput" type="password" autocomplete="new-password" maxlength="64" spellcheck="false" placeholder="Apple 生成的应用专用密码" disabled required>
+      <button class="button button-primary button-sm" id="appPasswordSave" type="submit" disabled>加密保存</button>
+      <a class="text-button" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">前往 Apple 账户生成 ↗</a>
+    </form>
+
     <div class="payment-help payment-help-single">
       <div class="gift-card-flow">
         <div class="subpanel-head">

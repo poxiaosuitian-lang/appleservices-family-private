@@ -649,7 +649,33 @@ func run() (runErr error) {
 		return hmeClient.List(actionCtx)
 	}
 	autoHMEForward := make(chan struct{}, 1)
+	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+		if action == "app-password-ensure" || action == "app-password-save" {
+			manual := ""
+			if action == "app-password-save" {
+				manual = strings.TrimSpace(commandCode)
+				if manual == "" {
+					return control.Result{Message: "请输入应用专用密码", Stage: "app-password-format"}
+				}
+			}
+			return appPasswordAction(actionCtx, *dir, appleID, password, manual, store, func(checkCtx context.Context) (bool, error) {
+				source, ok := active.(interface {
+					StorageInfo(context.Context) (*icloud.StorageInfo, error)
+				})
+				if !ok {
+					return false, errors.New("storage query unavailable")
+				}
+				quota, err := source.StorageInfo(checkCtx)
+				return quota != nil && quota.PaidBytes > 0, err
+			}, func() (appPasswordPortal, error) {
+				portal, err := icloud.NewAppleAccountClientWithStore(*dir, appleID)
+				if err == nil {
+					portal.SetSecurityQuestionsProvider(securityAnswers)
+				}
+				return portal, err
+			}, generateCode)
+		}
 		if action == "security-resume" {
 			if err := securityAnswers.resume(); err != nil {
 				return control.Result{Message: err.Error(), Stage: "security-questions"}
@@ -1427,8 +1453,15 @@ func run() (runErr error) {
 		defer timer.Stop()
 		autoMail = timer.C
 	}
+	// Reuse encrypted records; otherwise provision once after a paid-account
+	// login. The task's durable marker prevents replay after ambiguous creation.
+	if !*listenOnly {
+		autoAppPassword <- struct{}{}
+	}
 	for {
 		select {
+		case <-autoAppPassword:
+			performAction(ctx, "app-password-ensure", "", "", "", "", nil)
 		case <-autoHMEForward:
 			// Run after replying to the verified purchase, so web authentication
 			// cannot turn a completed subscription into an HTTP timeout.
@@ -1509,7 +1542,9 @@ func run() (runErr error) {
 				command.Reply <- control.Result{Message: "请重新查看当前登录请求"}
 				continue
 			}
-			command.Reply <- performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers)
+			result := performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers)
+			queueHMEForwardAfterPurchase(result, autoAppPassword)
+			command.Reply <- result
 		case <-refresh.C:
 			result := renew()
 			if status.VerificationRequired {

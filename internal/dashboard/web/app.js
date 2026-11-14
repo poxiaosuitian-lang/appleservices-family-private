@@ -5,6 +5,7 @@ let storeAuthReady = false, storeAuthAccount = '', storeAuthPID = 0, storeAuthRe
 let giftOwner = '', giftPID = 0;
 let purchaseFlowRunning = false;
 let verificationContext = '';
+let appPasswordOwner = '', appPasswordPID = 0;
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
 let themePref = localStorage.getItem('appleservices:theme') || 'light';
@@ -585,6 +586,8 @@ function renderAccounts(view) {
       storageAccount = ''; storageCheckedAt = ''; planAccount = ''; planCheckedAt = '';
       purchaseAction = ''; purchaseLabel = ''; activationInfo = null; activationAccount = '';
       $('purchaseButton').textContent = '开通 iCloud+ · 50GB';
+      $('appPasswordInput').value = '';
+      renderAppPassword(null, false);
       renderFamily(null);
       renderStorage(null);
       renderPlans(null);
@@ -642,6 +645,25 @@ function scheduleAutoRefresh(view, activated) {
 
 function hasPaidStorage(view) { return !!view?.storage && !view.storage_stale && view.storage.paid_bytes > 0; }
 
+function renderAppPassword(view, online) {
+  const info = view?.app_password, state = info?.state || '', pid = view?.status?.pid || 0;
+  const manual = ['verification_required', 'unknown', 'failed'].includes(state);
+  const available = !!view && online && view.control_ready && hasPaidStorage(view) && state !== 'pending';
+  const input = $('appPasswordInput');
+  if (appPasswordOwner !== selectedAccount || appPasswordPID !== pid || !online || !manual) input.value = '';
+  appPasswordOwner = selectedAccount;
+  appPasswordPID = pid;
+  const labels = {ready: '已加密保存', pending: '正在配置…', verification_required: '需要 Apple 验证', unknown: '结果待确认', failed: '配置未完成', not_subscribed: '订阅后自动配置'};
+  $('appPasswordSummary').textContent = '应用专用密码：' + (labels[state] || (hasPaidStorage(view) ? '未配置' : '订阅后自动配置'));
+  $('appPasswordEnsure').hidden = state === 'ready';
+  $('appPasswordEnsure').disabled = busy || !available;
+  $('appPasswordMessage').textContent = manual ? (info.message || '请在 Apple 账户页面完成验证并生成应用专用密码，再加密保存。') : '';
+  $('appPasswordMessage').hidden = !manual;
+  $('appPasswordForm').hidden = !manual;
+  input.disabled = busy || !available;
+  $('appPasswordSave').disabled = busy || !available || !input.value.trim();
+}
+
 let securityQuestionsKey = '';
 function renderSecurityQuestions(view, ready) {
   const status = view.security_questions, questions = status?.questions || [];
@@ -685,6 +707,7 @@ function render(view) {
   renderActivation(view);
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
+  renderAppPassword(view, online);
   const nextVerificationContext = JSON.stringify([selectedAccount, status.pid || 0, status.state || '']);
   if (verificationContext !== nextVerificationContext) {
     verificationContext = nextVerificationContext;
@@ -983,6 +1006,9 @@ async function action(name, extra = {}, options = {}) {
   if (current) render(current);
   try {
     const result = await api('action', { action: name, ...extra });
+    if (name.startsWith('app-password-') && current && actionAccount === selectedAccount && actionPID === (current.status?.pid || 0)) {
+      current.app_password = result.app_password || {state: result.ok ? 'unknown' : 'failed', message: result.message || '应用专用密码状态尚未确认'};
+    }
     if (result.family) {
       const checkedAt = new Date().toISOString();
       if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
@@ -1113,6 +1139,19 @@ $('renewButton').addEventListener('click', () => action('validate-account'));
 $('storageButton').addEventListener('click', () => action('storage-info'));
 $('primaryMailCheck').addEventListener('click', () => action('mail-check'));
 $('primaryMailEnsure').addEventListener('click', () => action('mail-ensure'));
+$('appPasswordEnsure').addEventListener('click', () => {
+  if (!$('appPasswordEnsure').disabled && current?.selected === selectedAccount) action('app-password-ensure');
+});
+$('appPasswordInput').addEventListener('input', () => {
+  if (current) renderAppPassword(current, current.status?.running && current.status?.authenticated);
+});
+$('appPasswordForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = $('appPasswordInput'), code = input.value.trim(), enabled = !$('appPasswordSave').disabled;
+  input.value = '';
+  if (!code || !enabled || current?.selected !== selectedAccount) return;
+  await action('app-password-save', {code});
+});
 $('securityQuestionsRead').addEventListener('click', async () => {
   const account = selectedAccount;
   if (current?.security_questions?.blocked && current.security_questions.blocked_reason !== 'rejected') {
