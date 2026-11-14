@@ -386,6 +386,8 @@
         </div>
       </div>
       <div class="commerce-actions">
+        <span id="appPasswordSummary" class="app-password-status" role="status">应用专用密码：订阅后自动配置</span>
+        <button class="button button-light button-sm" type="button" id="appPasswordEnsure" disabled>配置应用专用密码</button>
         <button class="button button-primary button-sm" type="button" id="purchaseButton" disabled>开通 iCloud+ · 50GB</button>
       </div>
     </div>
@@ -405,10 +407,6 @@
     <p id="purchaseResult" class="purchase-result-banner" role="status" hidden></p>
     <div id="planList" class="plan-list" hidden></div>
 
-    <div class="button-row">
-      <span id="appPasswordSummary" class="cache-note" role="status">应用专用密码：订阅后自动配置</span>
-      <button class="button button-light button-sm" type="button" id="appPasswordEnsure" disabled>配置应用专用密码</button>
-    </div>
     <p id="appPasswordMessage" class="cache-note" role="status" hidden></p>
     <form id="appPasswordForm" class="button-row" autocomplete="off" hidden>
       <label class="sr-only" for="appPasswordInput">Apple 生成的应用专用密码</label>

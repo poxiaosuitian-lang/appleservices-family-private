@@ -1760,6 +1760,16 @@ input[readonly] {
   justify-content: flex-end;
 }
 
+.app-password-status {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
 .activation-card .commerce-actions {
   margin-top: 12px;
   justify-content: flex-start;
