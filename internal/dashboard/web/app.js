@@ -6,6 +6,7 @@ let giftOwner = '', giftPID = 0;
 let purchaseFlowRunning = false;
 let verificationContext = '';
 let appPasswordOwner = '', appPasswordPID = 0;
+let serverSyncAccount = '', serverSyncPID = 0;
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
 let themePref = localStorage.getItem('appleservices:theme') || 'light';
@@ -708,6 +709,8 @@ function render(view) {
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
   renderAppPassword(view, online);
+  $('serverSyncButton').disabled = busy || !online || !view.control_ready || view.app_password?.state !== 'ready';
+  if ($('serverSyncDialog').open && (serverSyncAccount !== selectedAccount || serverSyncPID !== (status.pid || 0))) $('serverSyncDialog').close();
   const nextVerificationContext = JSON.stringify([selectedAccount, status.pid || 0, status.state || '']);
   if (verificationContext !== nextVerificationContext) {
     verificationContext = nextVerificationContext;
@@ -1425,3 +1428,21 @@ poll();
 setInterval(poll, 2500);
 setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
+
+$('serverSyncButton').addEventListener('click', () => {
+  if ($('serverSyncButton').disabled) return;
+  serverSyncAccount = selectedAccount; serverSyncPID = current?.status?.pid || 0;
+  $('serverSyncAccount').textContent = current?.login_account || current?.account || '当前账号';
+  $('serverSyncDialog').showModal();
+});
+$('serverSyncClose').addEventListener('click', () => $('serverSyncDialog').close());
+$('serverSyncDialog').addEventListener('close', () => { $('serverSyncToken').value = ''; });
+$('serverSyncForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy || selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) return;
+  const url = $('serverSyncURL').value.trim(), key = $('serverSyncToken').value;
+  if (!url.startsWith('https://') || key.length < 32) { notice('请填写 HTTPS 地址和至少 32 位的专用同步密钥', true); return; }
+  $('serverSyncToken').value = '';
+  $('serverSyncDialog').close();
+  await action('hme-server-sync', {note:url, code:key, label:current?.account || ''});
+});

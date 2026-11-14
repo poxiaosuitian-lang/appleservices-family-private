@@ -24,6 +24,7 @@ import (
 	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/circle"
 	"github.com/Laky-64/appleservices/internal/control"
+	"github.com/Laky-64/appleservices/internal/hmesync"
 	"github.com/Laky-64/appleservices/internal/mailsetup"
 	"github.com/Laky-64/appleservices/nativeadi"
 )
@@ -651,6 +652,44 @@ func run() (runErr error) {
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+		if action == "hme-server-sync" {
+			if _, err := hmesync.Endpoint(commandNote); err != nil {
+				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}
+			}
+			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
+			defer done()
+			info, err := loadHME(queryCtx)
+			if err != nil {
+				return control.Result{Message: "隐藏邮箱会话未通过核验，请先读取隐藏邮箱", Stage: "hme-server-sync"}
+			}
+			mailbox := ownICloudForwardTarget(info)
+			if mailbox == "" {
+				return control.Result{Message: "无法唯一确定本账号的 iCloud 邮箱，请先设置隐私邮箱转发", Stage: "hme-server-sync"}
+			}
+			if !hmeForwardMatches(info, mailbox) {
+				return control.Result{Message: "请先将隐私邮箱转发到本账号的 iCloud 邮箱", Stage: "hme-server-sync"}
+			}
+			record, err := store.LoadAppPassword(appleID)
+			if err != nil || record == nil {
+				return control.Result{Message: "请先配置并加密保存本账号的应用专用密码", Stage: "hme-server-sync"}
+			}
+			cookies, host, err := hmeClient.ExportServerCookies()
+			if err != nil {
+				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}
+			}
+			name := strings.TrimSpace(commandLabel)
+			if name == "" {
+				name = appleID
+			}
+			if len(name) > 64 {
+				name = mailbox
+			}
+			id, err := hmesync.Import(queryCtx, commandNote, commandCode, hmesync.Payload{Version: 1, SourceID: hmesync.SourceID(appleID), AppleID: appleID, Name: name, ICloudEmail: mailbox, Host: host, Cookies: cookies, AppPassword: record.Password})
+			if err != nil {
+				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}
+			}
+			return control.Result{OK: true, Message: "服务器已导入账号，隐藏邮箱和 IMAP 均已验证 · " + id, Stage: "hme-server-sync"}
+		}
 		if action == "app-password-ensure" || action == "app-password-save" {
 			manual := ""
 			if action == "app-password-save" {
