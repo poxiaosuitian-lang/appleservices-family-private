@@ -11,7 +11,7 @@ import (
 )
 
 func TestServerLoginOrchestration(t *testing.T) {
-	for _, mode := range []string{"already-ready", "auto-code", "manual-needed", "provider-failed", "sms", "bad-source", "old-server", "redirect", "rejected", "manual-verify"} {
+	for _, mode := range []string{"already-ready", "auto-code", "manual-needed", "provider-failed", "sms", "sms-device-capable", "bad-source", "old-server", "redirect", "rejected", "manual-verify"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := []string{}
 			generated := 0
@@ -57,14 +57,14 @@ func TestServerLoginOrchestration(t *testing.T) {
 					state = "otp_required"
 					nonce = challenge
 				}
-				if input.Operation == "verify" && (input.Code != "123456" || input.Challenge != challenge) {
+				if (input.Operation == "verify" || input.Operation == "verify_device") && (input.Code != "123456" || input.Challenge != challenge) {
 					t.Error("incorrect challenge binding")
 				}
 				method := "trusted_device"
-				if mode == "sms" {
+				if mode == "sms" || mode == "sms-device-capable" {
 					method = "sms"
 				}
-				json.NewEncoder(w).Encode(map[string]any{"success": true, "data": LoginResult{SourceID: source, State: state, Challenge: nonce, Verification: method}})
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "data": LoginResult{SourceID: source, State: state, Challenge: nonce, Verification: method, DeviceCodeSupported: mode == "sms-device-capable"}})
 			}))
 			defer server.Close()
 			provider := func(context.Context) (string, error) {
@@ -87,6 +87,10 @@ func TestServerLoginOrchestration(t *testing.T) {
 			case "already-ready", "manual-verify":
 				if err != nil || result.State != "ready" || len(calls) != 1 || generated != 0 {
 					t.Fatal("unneeded login or OTP generation")
+				}
+			case "sms-device-capable":
+				if err != nil || result.State != "ready" || len(calls) != 3 || calls[2] != "verify_device" || generated != 1 {
+					t.Fatal("device code was not submitted to explicit device route")
 				}
 			case "auto-code":
 				if err != nil || result.State != "ready" || len(calls) != 3 || generated != 1 {

@@ -25,13 +25,14 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       }
       if (url.pathname === '/api/action') {
         const input = request.postDataJSON();
-        assert(['hme-server-sync','hme-server-login'].includes(input.action)); assert.equal(input.profile_id,'1'); assert.equal(input.note,'https://one.example.test');
+        assert(['hme-server-sync','hme-server-login','hme-server-login-device'].includes(input.action)); assert.equal(input.profile_id,'1'); assert.equal(input.note,'https://one.example.test');
         assert(!input.code); assert.equal(url.searchParams.get('account'),'fixture');
         assert.equal(await page.locator('#serverSyncToken').inputValue(),''); actions.push(input);
-        if (input.action === 'hme-server-login') {
+        if (input.action.startsWith('hme-server-login')) {
           loginCalls++;
           if (loginMode === 'unavailable') return route.fulfill({json:{ok:false,message:'服务器尚未更新自动登录接口'}});
-          if (loginCalls === 1) return route.fulfill({json:{ok:false,message:'请输入受信任设备上的六位验证码',server_login:{state:'otp_required',challenge:'a'.repeat(64)}}});
+          if (loginCalls === 1) return route.fulfill({json:{ok:false,message:'请输入受信任设备上的六位验证码',server_login:{state:'otp_required',challenge:'a'.repeat(64),verification:'sms',device_code_supported:true}}});
+          assert.equal(input.action,loginMode === 'sms' ? 'hme-server-login' : 'hme-server-login-device');
           assert.equal(input.request_id,'a'.repeat(64)); assert.equal(input.label,'123456');
           assert.equal(await page.locator('#serverSyncOTP').inputValue(),'');
           return route.fulfill({json:{ok:true,message:'Web、IMAP 和 Apple 新通道均已就绪',server_login:{state:'ready'}}});
@@ -65,6 +66,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(()=>!document.getElementById('serverSyncOTPRow').hidden);
     assert.equal(actions.length,2);
     assert(await page.locator('#serverSyncDialog').isVisible());
+    assert.equal(await page.locator('#serverSyncOTPSource').inputValue(),'trusted_device');
+    assert((await page.locator('#serverSyncOTP').getAttribute('placeholder')).includes('iPhone'));
     await page.locator('#serverSyncOTP').fill('123456');
     await page.locator('#serverSyncSubmit').click();
     await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('均已就绪'));
@@ -80,6 +83,18 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('#serverSyncDelete').click();
     await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('已删除'));
     assert.equal(profiles.length,1);
+    loginMode = 'sms'; loginCalls = 0;
+    await page.locator('#serverSyncSubmit').click();
+    await page.waitForFunction(()=>!document.getElementById('serverSyncOTPRow').hidden);
+    await page.locator('#serverSyncOTP').fill('123456');
+    await page.locator('#serverSyncOTPSource').selectOption('sms');
+    assert.equal(await page.locator('#serverSyncOTP').inputValue(),'');
+    assert((await page.locator('#serverSyncOTP').getAttribute('placeholder')).includes('短信'));
+    await page.locator('#serverSyncOTP').fill('123456');
+    await page.locator('#serverSyncSubmit').click();
+    await page.waitForFunction(()=>!document.getElementById('serverSyncDialog').open);
+    await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
     loginMode = 'unavailable';
     const before = actions.length;
     await page.locator('#serverSyncSubmit').click();

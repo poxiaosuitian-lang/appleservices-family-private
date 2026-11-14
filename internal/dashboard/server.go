@@ -454,7 +454,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	request.Header.Set("Content-Type", "application/json")
 	timeout := 95 * time.Second
 	if action, ok := body.(control.Action); ok {
-		if action.Action == "hme-server-login" || action.Action == "hme-server-sync" || strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+		if action.Action == "hme-server-login-device" || action.Action == "hme-server-login" || action.Action == "hme-server-sync" || strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
 		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") || strings.HasPrefix(action.Action, "mail-") {
 			timeout = 2*time.Minute + 5*time.Second

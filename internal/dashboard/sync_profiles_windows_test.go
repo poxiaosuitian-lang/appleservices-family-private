@@ -96,7 +96,7 @@ func TestSyncActionResolvesSelectedProfileOnlyInBackend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "runtime.json"), status, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"hme-server-sync", "hme-server-login"} {
+	for _, name := range []string{"hme-server-sync", "hme-server-login", "hme-server-login-device"} {
 		body, _ := json.Marshal(map[string]string{"action": name, "profile_id": value.Selected, "note": "https://destination.example.test"})
 		r := httptest.NewRequest("POST", s.URL()+"/api/action", bytes.NewReader(body))
 		r.Header.Set("X-App-Token", s.token)

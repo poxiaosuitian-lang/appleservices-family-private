@@ -1436,6 +1436,22 @@ setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
 let syncProfiles = [], syncConfigBusy = false, syncPending = null, syncImported = null;
+function renderSyncVerification(result, preserveSource) {
+  const source = $('serverSyncOTPSource');
+  const previous = source.value;
+  source.replaceChildren();
+  if (result.device_code_supported || result.verification !== 'sms') source.add(new Option('iPhone / Mac', 'trusted_device'));
+  if (result.verification === 'sms') source.add(new Option('手机短信', 'sms'));
+  if (preserveSource && [...source.options].some(option => option.value === previous)) source.value = previous;
+  updateSyncCodePlaceholder();
+}
+function updateSyncCodePlaceholder() {
+  $('serverSyncOTP').placeholder = $('serverSyncOTPSource').value === 'sms' ? '手机短信中的六位验证码' : 'iPhone 或 Mac 上的六位验证码';
+}
+$('serverSyncOTPSource').addEventListener('change', () => {
+  $('serverSyncOTP').value = '';
+  updateSyncCodePlaceholder();
+});
 function resetSyncLogin() {
   syncPending = null; syncImported = null;
   $('serverSyncOTP').value = ''; $('serverSyncOTP').required = false;
@@ -1545,11 +1561,13 @@ $('serverSyncForm').addEventListener('submit', async event => {
     const code = pending ? $('serverSyncOTP').value.trim() : '';
     $('serverSyncOTP').value = '';
     syncFeedback(pending ? '正在验证…' : 'Web 和 IMAP 已同步，正在登录 Apple 新通道…');
-    const result = await api('action', {action:'hme-server-login',profile_id:profile.id,note:profile.url,
+    const loginAction = pending && pending.device_code_supported && $('serverSyncOTPSource').value === 'trusted_device' ? 'hme-server-login-device' : 'hme-server-login';
+    const result = await api('action', {action:loginAction,profile_id:profile.id,note:profile.url,
       ...(pending ? {request_id:pending.challenge,label:code} : {})});
     if (!sameSession()) return;
     if (result.server_login?.state === 'otp_required') {
       syncPending = result.server_login;
+      renderSyncVerification(syncPending, !!pending);
       $('serverSyncOTPRow').hidden = false; $('serverSyncOTP').required = true;
       $('serverSyncSubmit').textContent = '验证并完成';
       syncFeedback(result.message || '请输入受信任设备上的六位验证码');

@@ -15,10 +15,11 @@ import (
 const LoginPath = "/api/integrations/appleservices/apple-login"
 
 type LoginResult struct {
-	SourceID     string `json:"source_id"`
-	State        string `json:"state"`
-	Challenge    string `json:"challenge,omitempty"`
-	Verification string `json:"verification,omitempty"`
+	DeviceCodeSupported bool   `json:"device_code_supported"`
+	SourceID            string `json:"source_id"`
+	State               string `json:"state"`
+	Challenge           string `json:"challenge,omitempty"`
+	Verification        string `json:"verification,omitempty"`
 }
 type loginRequest struct {
 	Version   int    `json:"version"`
@@ -30,6 +31,17 @@ type loginRequest struct {
 	Challenge string `json:"challenge,omitempty"`
 }
 type CodeProvider func(context.Context) (string, error)
+
+// VerifyDeviceCode explicitly targets Apple's trusted-device verification, even
+// when the pending login also has a selected SMS phone. Never tries both routes.
+func VerifyDeviceCode(ctx context.Context, base, token, appleID, code, challenge string) (*LoginResult, error) {
+	if !regexp.MustCompile(`^[0-9]{6}$`).MatchString(code) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(challenge) {
+		return nil, errors.New("请输入本次登录的六位受信任设备验证码")
+	}
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 115 * time.Second}
+	defer client.CloseIdleConnections()
+	return loginCall(ctx, client, base, token, loginRequest{Version: 1, SourceID: SourceID(appleID), AppleID: appleID, Operation: "verify_device", Code: code, Challenge: challenge})
+}
 
 // Login checks the server's own management session, then signs in only if
 // required. There are no retry loops, automatic SMS requests or alias mutations.
@@ -63,7 +75,7 @@ func loginWithClient(ctx context.Context, client *http.Client, base, token, appl
 	if err != nil || result.State == "ready" {
 		return result, err
 	}
-	if provider == nil || result.Verification == "sms" {
+	if provider == nil || (result.Verification == "sms" && !result.DeviceCodeSupported) {
 		return result, nil
 	}
 	code, codeErr := provider(ctx)
@@ -71,6 +83,9 @@ func loginWithClient(ctx context.Context, client *http.Client, base, token, appl
 		return result, nil
 	}
 	request.Operation = "verify"
+	if result.DeviceCodeSupported {
+		request.Operation = "verify_device"
+	}
 	request.Code = code
 	request.Challenge = result.Challenge
 	return loginCall(ctx, client, base, token, request)

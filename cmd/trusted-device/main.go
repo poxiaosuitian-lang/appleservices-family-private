@@ -652,17 +652,25 @@ func run() (runErr error) {
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
-		if action == "hme-server-login" {
+		if action == "hme-server-login" || action == "hme-server-login-device" {
 			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
 			defer done()
-			result, err := hmesync.Login(queryCtx, commandNote, commandCode, appleID, password, commandLabel, visibleRequestID, generateCode)
+			var result *hmesync.LoginResult
+			var err error
+			if action == "hme-server-login-device" {
+				result, err = hmesync.VerifyDeviceCode(queryCtx, commandNote, commandCode, appleID, commandLabel, visibleRequestID)
+			} else {
+				result, err = hmesync.Login(queryCtx, commandNote, commandCode, appleID, password, commandLabel, visibleRequestID, generateCode)
+			}
 			if err != nil {
 				return control.Result{Message: err.Error(), Stage: "hme-server-login"}
 			}
 			if result.State == "otp_required" {
 				message := "Apple 要求补充验证码，请输入受信任设备上显示的六位验证码"
-				if result.Verification == "sms" {
-					message = "请输入 Apple 发到绑定手机号的六位短信验证码"
+				if result.DeviceCodeSupported {
+					message = "请选择验证码来源并输入六位验证码"
+				} else if result.Verification == "sms" {
+					message = "当前服务器只支持短信验证；使用 iPhone 或 Mac 验证码需更新服务器"
 				}
 				return control.Result{Message: message, Stage: "hme-server-login", ServerLogin: result}
 			}
