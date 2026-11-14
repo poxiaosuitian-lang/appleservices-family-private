@@ -454,7 +454,7 @@ func (s *Server) callFor(ctx context.Context, dir, path string, body any, result
 	request.Header.Set("Content-Type", "application/json")
 	timeout := 95 * time.Second
 	if action, ok := body.(control.Action); ok {
-		if action.Action == "hme-server-sync" || strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
+		if action.Action == "hme-server-login" || action.Action == "hme-server-sync" || strings.HasPrefix(action.Action, "app-password-") || action.Action == "gift-prepare" || action.Action == "gift-redeem" || action.Action == "storage-skill-auth-file" || action.Action == "storage-skill-auth-local" || action.Action == "storage-purchase-prepare-us" {
 			timeout = 3*time.Minute + 5*time.Second
 		} else if action.Action == "family-add-self" || strings.HasPrefix(action.Action, "hme-") || strings.HasPrefix(action.Action, "mail-") {
 			timeout = 2*time.Minute + 5*time.Second
@@ -1209,7 +1209,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			action := input.Action
-			if action.Action == "hme-server-sync" && input.ProfileID != "" {
+			if (action.Action == "hme-server-sync" || action.Action == "hme-server-login") && input.ProfileID != "" {
 				profile, err := s.resolveSyncProfile(input.ProfileID, action.Note)
 				if err != nil {
 					json.NewEncoder(w).Encode(control.Result{Message: err.Error()})

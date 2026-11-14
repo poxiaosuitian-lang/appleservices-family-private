@@ -723,12 +723,16 @@
     <input id="serverSyncURL" type="url" placeholder="https://hme.example.com" required>
     <label for="serverSyncToken">专用同步密钥</label>
     <input id="serverSyncToken" type="password" autocomplete="new-password" minlength="32" maxlength="512" required>
-    <p class="cache-note">将当前账号的网页会话和应用专用密码发送到此服务器，用于管理隐藏邮箱和收信。</p>
+    <p class="cache-note">同步账号并登录 Apple 新通道；需要时将使用本机密码和验证码完成服务器认证。</p>
+    <div id="serverSyncOTPRow" hidden>
+      <label for="serverSyncOTP">Apple 双重认证验证码</label>
+      <input id="serverSyncOTP" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="受信任设备上的六位验证码">
+    </div>
     <p id="serverSyncFeedback" role="status"></p>
     <div class="button-row">
       <button class="button button-light" id="serverSyncSave" type="button">保存配置</button>
       <button class="button button-light" id="serverSyncDelete" type="button" disabled>删除配置</button>
-      <button class="button button-primary" type="submit">确认同步</button>
+      <button class="button button-primary" id="serverSyncSubmit" type="submit">确认同步</button>
     </div>
   </form>
 </dialog>

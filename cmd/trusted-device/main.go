@@ -652,6 +652,22 @@ func run() (runErr error) {
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+		if action == "hme-server-login" {
+			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
+			defer done()
+			result, err := hmesync.Login(queryCtx, commandNote, commandCode, appleID, password, commandLabel, visibleRequestID, generateCode)
+			if err != nil {
+				return control.Result{Message: err.Error(), Stage: "hme-server-login"}
+			}
+			if result.State == "otp_required" {
+				message := "Apple 要求补充验证码，请输入受信任设备上显示的六位验证码"
+				if result.Verification == "sms" {
+					message = "请输入 Apple 发到绑定手机号的六位短信验证码"
+				}
+				return control.Result{Message: message, Stage: "hme-server-login", ServerLogin: result}
+			}
+			return control.Result{OK: true, Message: "Web、IMAP 和 Apple 新通道均已就绪", Stage: "hme-server-login", ServerLogin: result}
+		}
 		if action == "hme-server-sync" {
 			if _, err := hmesync.Endpoint(commandNote); err != nil {
 				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}

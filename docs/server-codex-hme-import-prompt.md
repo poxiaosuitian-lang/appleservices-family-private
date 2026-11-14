@@ -63,7 +63,7 @@
 
 参考现有 `internal/server/account_handlers.go`、`internal/server/auth.go`、`internal/server/server.go`、`internal/account/manager.go`、`internal/account/public.go`、`internal/mail`。新增专用 handler 和 manager 事务方法、映射字段与迁移逻辑，保持旧 accounts.json 可读取。修改 `main.go` 环境变量装配、Docker Compose 环境变量透传、API.md 与 README，实际路径以当前版本为准。
 
-该接口只接入 Web HME + IMAP。不要把导入 Cookie 当作 `apple_account_session`，不要把本地 Mac/GSA/PET 状态塞入第二通道，不要自动登录第二通道或生成额外应用专用密码。
+该导入接口只接入 Web HME + IMAP，不把 Cookie 当作 `apple_account_session`，不混入本地 Mac/GSA/PET 状态，不生成额外应用专用密码。同步后的 Apple Account 新通道认证由独立接口完成，见 [新通道部署提示词](server-codex-apple-login-prompt.md)；不要通过修改本导入协议来模拟认证。
 
 新增测试：鉴权失败不访问 Apple、不返回秘密；合法新增/更新；无效版本/host/source_id；账号错配；HME 失败；IMAP 失败；保存失败回滚；相同源并发与重启去重；旧账号认领冲突；已有 AppleSession/任务保留；所有响应和日志无凭据。测试用本地合成响应，不消耗真实账号。
 

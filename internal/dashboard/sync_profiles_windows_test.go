@@ -96,18 +96,21 @@ func TestSyncActionResolvesSelectedProfileOnlyInBackend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "runtime.json"), status, 0600); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"action": "hme-server-sync", "profile_id": value.Selected, "note": "https://destination.example.test"})
-	r := httptest.NewRequest("POST", s.URL()+"/api/action", bytes.NewReader(body))
-	r.Header.Set("X-App-Token", s.token)
-	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) || strings.Contains(w.Body.String(), secret) {
-		t.Fatal("sync action failed or exposed key")
+	for _, name := range []string{"hme-server-sync", "hme-server-login"} {
+		body, _ := json.Marshal(map[string]string{"action": name, "profile_id": value.Selected, "note": "https://destination.example.test"})
+		r := httptest.NewRequest("POST", s.URL()+"/api/action", bytes.NewReader(body))
+		r.Header.Set("X-App-Token", s.token)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) || strings.Contains(w.Body.String(), secret) {
+			t.Fatal("sync action failed or exposed key")
+		}
+		if got.Code != secret || got.Note != "https://destination.example.test" || got.Action != name {
+			t.Fatal("profile did not resolve into worker credentials")
+		}
 	}
-	if got.Code != secret || got.Note != "https://destination.example.test" || got.Action != "hme-server-sync" {
-		t.Fatal("profile did not resolve into worker credentials")
-	}
+
 }
 
 func TestSyncProfilesAPIOnlyExposesMetadata(t *testing.T) {

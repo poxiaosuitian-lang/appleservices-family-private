@@ -1435,7 +1435,13 @@ setInterval(poll, 2500);
 setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
-let syncProfiles = [], syncConfigBusy = false;
+let syncProfiles = [], syncConfigBusy = false, syncPending = null, syncImported = null;
+function resetSyncLogin() {
+  syncPending = null; syncImported = null;
+  $('serverSyncOTP').value = ''; $('serverSyncOTP').required = false;
+  $('serverSyncOTPRow').hidden = true;
+  $('serverSyncSubmit').textContent = '确认同步';
+}
 function syncFeedback(message, failed = false) {
   $('serverSyncFeedback').textContent = message;
   $('serverSyncFeedback').classList.toggle('error', failed);
@@ -1448,6 +1454,7 @@ function syncConfigLock(locked) {
   $('serverSyncDelete').disabled = locked || !$('serverSyncProfile').value;
 }
 function selectSyncProfile(id) {
+  resetSyncLogin();
   const profile = syncProfiles.find(item => item.id === id);
   $('serverSyncProfile').value = profile?.id || '';
   $('serverSyncURL').value = profile?.url || '';
@@ -1485,7 +1492,7 @@ $('serverSyncButton').addEventListener('click', async () => {
   finally { syncConfigLock(false); if (!loaded) for (const element of $('serverSyncForm').querySelectorAll('input, select, button')) { if (element.id !== 'serverSyncClose') element.disabled = true; } }
 });
 $('serverSyncClose').addEventListener('click', () => $('serverSyncDialog').close());
-$('serverSyncDialog').addEventListener('close', () => { $('serverSyncToken').value = ''; });
+$('serverSyncDialog').addEventListener('close', () => { $('serverSyncToken').value = ''; resetSyncLogin(); });
 $('serverSyncProfile').addEventListener('change', async () => {
   const id = $('serverSyncProfile').value;
   selectSyncProfile(id);
@@ -1495,7 +1502,9 @@ $('serverSyncProfile').addEventListener('change', async () => {
   catch (error) { syncFeedback(error.message, true); }
   finally { syncConfigLock(false); }
 });
+$('serverSyncToken').addEventListener('input', resetSyncLogin);
 $('serverSyncURL').addEventListener('input', () => {
+  resetSyncLogin();
   const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
   const unchanged = profile?.url === $('serverSyncURL').value.trim().replace(/\/+$/, '');
   $('serverSyncToken').required = !unchanged;
@@ -1519,12 +1528,44 @@ $('serverSyncForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (busy || syncConfigBusy || selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) return;
   const account = serverSyncAccount, pid = serverSyncPID;
+  const sameSession = () => $('serverSyncDialog').open && selectedAccount === account && current?.status?.pid === pid;
   syncConfigLock(true);
+  busy = true;
   try {
-    const profile = await saveSyncProfile();
-    if (!profile || !$('serverSyncDialog').open || selectedAccount !== account || current?.status?.pid !== pid) return;
+    const pending = syncPending;
+    const profile = syncImported || await saveSyncProfile();
+    if (!profile || !sameSession()) return;
+    if (!syncImported) {
+      syncFeedback('正在同步 Web 会话和 IMAP…');
+      const imported = await api('action', {action:'hme-server-sync',profile_id:profile.id,note:profile.url,label:current?.account || ''});
+      if (!sameSession()) return;
+      if (!imported.ok) throw new Error(imported.message || '账号同步未完成');
+      syncImported = profile;
+    }
+    const code = pending ? $('serverSyncOTP').value.trim() : '';
+    $('serverSyncOTP').value = '';
+    syncFeedback(pending ? '正在验证…' : 'Web 和 IMAP 已同步，正在登录 Apple 新通道…');
+    const result = await api('action', {action:'hme-server-login',profile_id:profile.id,note:profile.url,
+      ...(pending ? {request_id:pending.challenge,label:code} : {})});
+    if (!sameSession()) return;
+    if (result.server_login?.state === 'otp_required') {
+      syncPending = result.server_login;
+      $('serverSyncOTPRow').hidden = false; $('serverSyncOTP').required = true;
+      $('serverSyncSubmit').textContent = '验证并完成';
+      syncFeedback(result.message || '请输入受信任设备上的六位验证码');
+      return;
+    }
+    if (!result.ok || result.server_login?.state !== 'ready') {
+      syncPending = null; $('serverSyncOTPRow').hidden = true; $('serverSyncOTP').required = false;
+      $('serverSyncSubmit').textContent = '完成服务器登录';
+      throw new Error(result.message || '服务器新通道尚未就绪');
+    }
     $('serverSyncDialog').close();
-    await action('hme-server-sync', {profile_id:profile.id, note:profile.url, label:current?.account || ''});
-  } catch (error) { syncFeedback(error.message, true); }
-  finally { syncConfigLock(false); }
+    notice(result.message || 'Web、IMAP 和 Apple 新通道均已就绪');
+  } catch (error) { if (sameSession()) syncFeedback(error.message, true); }
+  finally {
+    busy = false; syncConfigLock(false);
+    if (current) render(current);
+    if (sameSession() && syncPending) $('serverSyncOTP').focus();
+  }
 });
