@@ -3375,3 +3375,7 @@ body.ui-ready .lower-grid {
     transform: none;
   }
 }
+
+.payment-help.payment-help-single {
+  grid-template-columns: minmax(0, 1fr);
+}
