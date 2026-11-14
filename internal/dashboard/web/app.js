@@ -817,7 +817,6 @@ function render(view) {
 
   if (hasPaidStorage(view)) {
     $('purchaseButton').textContent = 'iCloud+ 已开通';
-    $('planSummary').textContent = 'Apple 已核验付费容量 ' + gib(view.storage.paid_bytes) + '，无需再次开通。';
   } else if (purchaseAction) {
     $('purchaseButton').textContent = '开通 50GB · ' + purchaseLabel;
   }
@@ -926,41 +925,20 @@ function renderPlans(info, { checkedAt = '', stale = false } = {}) {
   planCheckedAt = checkedAt || '';
   const list = $('planList'), note = $('planCacheNote');
   list.replaceChildren();
+  list.hidden = true;
   purchaseAction = '';
   purchaseLabel = '';
   $('purchaseButton').textContent = '开通 iCloud+ · 50GB';
   if (!info?.plans?.length) {
-    $('planSummary').textContent = info ? 'Apple 没有返回可购方案。' : '先读取 Apple 实时报价；仅已验证的币种与价格会启用购买按钮。';
+    $('planSummary').textContent = info ? (stale ? '50GB 方案待重新读取' : '无 50GB 可购方案') : '尚未读取 50GB 方案';
     note.textContent = info ? cacheLabel('plan', checkedAt, stale) : '尚无本地状态';
     note.classList.toggle('stale', !!info && !!stale);
     return;
   }
   note.textContent = cacheLabel('plan', checkedAt, stale);
   note.classList.toggle('stale', !!stale);
-  let target = null;
-  for (const plan of info.plans) {
-    const is50GB = plan.bytes === 50 * 1024 * 1024 * 1024 && plan.available;
-    const isVerified = is50GB && ((plan.currency === 'CNY' && plan.price_minor === 600) || (plan.currency === 'USD' && plan.price_minor === 99));
-    const row = document.createElement('div');
-    row.className = 'plan-row' + (isVerified ? ' verified' : '');
-    const left = document.createElement('div');
-    left.className = 'plan-title';
-    const name = document.createElement('strong');
-    name.textContent = (plan.bytes ? gib(plan.bytes) : '未知容量') + (plan.period ? ' · ' + plan.period : '');
-    left.append(name);
-    if (isVerified) {
-      const badge = document.createElement('small');
-      badge.className = 'plan-badge';
-      badge.textContent = '支持开通';
-      left.append(badge);
-    }
-    const price = document.createElement('span');
-    price.className = 'plan-price';
-    price.textContent = plan.currency ? (plan.currency + ' ' + (plan.price_minor / 100).toFixed(2) + '/月') : '价格待 Apple 返回';
-    row.append(left, price);
-    list.append(row);
-    if (is50GB) target = plan;
-  }
+  const target = info.plans.find(plan => plan.bytes === 50 * 1024 * 1024 * 1024 && plan.available);
+  $('planSummary').textContent = stale ? '50GB 方案待重新读取' : target ? '有 50GB 可购方案' : '无 50GB 可购方案';
   if (!stale && target?.currency === 'CNY' && target.price_minor === 600) {
     purchaseAction = 'storage-purchase';
     purchaseLabel = 'CNY 6.00/月';
@@ -969,13 +947,9 @@ function renderPlans(info, { checkedAt = '', stale = false } = {}) {
     purchaseLabel = 'USD 0.99/月';
   }
   if (stale) {
-    $('planSummary').textContent = '显示上次保存的报价；点击检查并开通后，会先重新核验 Apple 实时报价。';
     if (purchaseAction === 'storage-skill-purchase-us') $('purchaseButton').textContent = '检查并开通 50GB';
   } else if (purchaseAction) {
     $('purchaseButton').textContent = '开通 50GB · ' + purchaseLabel;
-    $('planSummary').textContent = '已核对 50GB · ' + purchaseLabel + '。点击购买仍会再次确认。';
-  } else {
-    $('planSummary').textContent = 'Apple 返回了方案，但没有匹配已验证的 50GB 币种与价格；购买保持禁用。';
   }
 }
 
