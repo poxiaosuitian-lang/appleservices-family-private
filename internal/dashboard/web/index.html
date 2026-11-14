@@ -717,12 +717,19 @@
   <form id="serverSyncForm" class="dialog-form" autocomplete="off">
     <div class="dialog-top"><h3>同步到 icloud-hme</h3><button class="dialog-close" id="serverSyncClose" type="button" aria-label="关闭">×</button></div>
     <p id="serverSyncAccount"></p>
+    <label for="serverSyncProfile">服务器配置</label>
+    <select id="serverSyncProfile"><option value="">新增服务器</option></select>
     <label for="serverSyncURL">服务器地址</label>
     <input id="serverSyncURL" type="url" placeholder="https://hme.example.com" required>
     <label for="serverSyncToken">专用同步密钥</label>
     <input id="serverSyncToken" type="password" autocomplete="new-password" minlength="32" maxlength="512" required>
     <p class="cache-note">将当前账号的网页会话和应用专用密码发送到此服务器，用于管理隐藏邮箱和收信。</p>
-    <button class="button button-primary" type="submit">确认同步</button>
+    <p id="serverSyncFeedback" role="status"></p>
+    <div class="button-row">
+      <button class="button button-light" id="serverSyncSave" type="button">保存配置</button>
+      <button class="button button-light" id="serverSyncDelete" type="button" disabled>删除配置</button>
+      <button class="button button-primary" type="submit">确认同步</button>
+    </div>
   </form>
 </dialog>
 </body>

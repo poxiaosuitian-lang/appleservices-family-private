@@ -46,8 +46,9 @@ type Server struct {
 	// accounts holds every registered account. The legacy single-account
 	// fields below address the account whose directory is Config.Dir, so the
 	// original one-account behaviour and its tests keep working unchanged.
-	accounts   []*Account
-	accountsMu sync.Mutex
+	accounts       []*Account
+	accountsMu     sync.Mutex
+	syncProfilesMu sync.Mutex
 	// registryNote reports why the account list could not be loaded, so a
 	// failure is surfaced instead of silently presenting an empty list.
 	registryNote string
@@ -1131,6 +1132,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			json.NewEncoder(w).Encode(s.snapshotFor(ctx, r.URL.Query().Get("account")))
 			return
+		case r.URL.Path == "/api/sync-profiles" && (r.Method == "GET" || r.Method == "POST"):
+			s.serveSyncProfiles(w, r)
+			return
 		case r.Method == "POST" && r.URL.Path == "/api/start":
 			var creds credentials
 			if !readJSON(w, r, &creds) {
@@ -1197,9 +1201,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(result)
 			return
 		case r.Method == "POST" && r.URL.Path == "/api/action":
-			var action control.Action
-			if !readJSON(w, r, &action) {
+			var input struct {
+				control.Action
+				ProfileID string `json:"profile_id,omitempty"`
+			}
+			if !readJSON(w, r, &input) {
 				return
+			}
+			action := input.Action
+			if action.Action == "hme-server-sync" && input.ProfileID != "" {
+				profile, err := s.resolveSyncProfile(input.ProfileID, action.Note)
+				if err != nil {
+					json.NewEncoder(w).Encode(control.Result{Message: err.Error()})
+					return
+				}
+				action.Note, action.Code = profile.URL, profile.Token
 			}
 			dir := s.config.Dir
 			var selected *Account

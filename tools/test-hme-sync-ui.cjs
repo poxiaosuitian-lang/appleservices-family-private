@@ -1,5 +1,72 @@
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-(async()=>{const b=await chromium.launch({headless:true,channel:'msedge'});try{const p=await b.newPage();const errors=[],calls=[];p.on('pageerror',e=>errors.push(e.message));const v={selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:53687091200},storage_stale:false};
-await p.route('**/*',async r=>{const u=new URL(r.request().url());if(u.hostname!=='fixture.test')return r.abort();if(u.pathname==='/api/view')return r.fulfill({json:v});if(u.pathname==='/api/action'){const x=r.request().postDataJSON();assert.equal(x.action,'hme-server-sync');assert.equal(x.code,'k'.repeat(32));assert.equal(x.note,'https://hme.example.test');assert.equal(u.searchParams.get('account'),'fixture');assert.equal(await p.locator('#serverSyncToken').inputValue(),'');calls.push(x.action);return r.fulfill({json:{ok:true,message:'服务器已导入账号，隐藏邮箱和 IMAP 均已验证'}})}const f=u.pathname==='/'?'index.html':u.pathname.slice(1);if(!['index.html','app.js','app.css'].includes(f))return r.abort();return r.fulfill({contentType:f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(__dirname,'../internal/dashboard/web',f),'utf8')})});
-await p.goto('http://fixture.test/#icloud');await p.waitForFunction(()=>!document.getElementById('serverSyncButton').disabled);await p.locator('#serverSyncButton').click();assert(await p.locator('#serverSyncDialog').isVisible());await p.locator('#serverSyncURL').fill('https://hme.example.test');await p.locator('#serverSyncToken').fill('k'.repeat(32));await p.locator('#serverSyncForm button[type=submit]').click();await p.waitForFunction(()=>document.getElementById('notice').textContent.includes('服务器已导入'));assert.deepEqual(calls,['hme-server-sync']);assert.equal(await p.evaluate(()=>JSON.stringify(localStorage).includes('k'.repeat(32))),false);assert.deepEqual(errors,[]);console.log('PASS: sync confirmation, selected account, secret clearing and no browser persistence');}finally{await b.close()}})().catch(e=>{console.error(e);process.exitCode=1});
+const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+(async () => {
+  const browser = await chromium.launch({headless:true, channel:process.env.BROWSER_CHANNEL || 'msedge'});
+  try {
+    const page = await browser.newPage(), errors = [], actions = [];
+    let profiles = [], selected = '', nextID = 1;
+    const view = {selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:53687091200},storage_stale:false};
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/*', async route => {
+      const request = route.request(), url = new URL(request.url());
+      if (url.hostname !== 'fixture.test') return route.abort();
+      if (url.pathname === '/api/view') return route.fulfill({json:view});
+      if (url.pathname === '/api/sync-profiles') {
+        if (request.method() === 'POST') {
+          const input = request.postDataJSON();
+          if (input.operation === 'save') {
+            let profile = profiles.find(p => p.id === input.id);
+            if (!profile) { assert(input.token.length >= 32); profile = {id:String(nextID++),key_saved:true}; profiles.push(profile); }
+            profile.url = input.url; selected = profile.id;
+          } else if (input.operation === 'select') selected = input.id;
+          else if (input.operation === 'delete') { profiles = profiles.filter(p => p.id !== input.id); selected = profiles[0]?.id || ''; }
+        }
+        return route.fulfill({json:{selected,profiles}});
+      }
+      if (url.pathname === '/api/action') {
+        const input = request.postDataJSON();
+        assert.equal(input.action,'hme-server-sync'); assert.equal(input.profile_id,'1'); assert.equal(input.note,'https://one.example.test');
+        assert(!input.code); assert.equal(url.searchParams.get('account'),'fixture');
+        assert.equal(await page.locator('#serverSyncToken').inputValue(),''); actions.push(input);
+        return route.fulfill({json:{ok:true,message:'服务器已导入账号'}});
+      }
+      const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+      if (!['index.html','app.js','app.css'].includes(file)) return route.abort();
+      return route.fulfill({contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(__dirname,'../internal/dashboard/web',file),'utf8')});
+    });
+    await page.goto('http://fixture.test/#icloud');
+    await page.locator('#serverSyncButton').click();
+    await page.locator('#serverSyncURL').fill('https://one.example.test');
+    await page.locator('#serverSyncToken').fill('k'.repeat(32));
+    await page.locator('#serverSyncSave').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('已加密保存'));
+    assert.equal(await page.locator('#serverSyncToken').inputValue(),'');
+    await page.locator('#serverSyncProfile').selectOption('');
+    await page.locator('#serverSyncURL').fill('https://two.example.test');
+    await page.locator('#serverSyncToken').fill('z'.repeat(32));
+    await page.locator('#serverSyncSave').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncProfile').value==='2');
+    await page.locator('#serverSyncClose').click();
+    await page.reload();
+    await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncProfile').value==='2');
+    assert.equal(await page.locator('#serverSyncURL').inputValue(),'https://two.example.test');
+    await page.locator('#serverSyncProfile').selectOption('1');
+    assert.equal(await page.locator('#serverSyncURL').inputValue(),'https://one.example.test');
+    await page.locator('#serverSyncForm button[type=submit]').click();
+    await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('服务器已导入'));
+    assert.equal(actions.length,1);
+    assert.equal(await page.evaluate(()=>JSON.stringify(localStorage).includes('k'.repeat(32))),false);
+    await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncProfile').value==='1');
+    await page.locator('#serverSyncURL').fill('https://changed.example.test');
+    await page.locator('#serverSyncSave').click();
+    assert.equal(profiles[0].url,'https://one.example.test');
+    page.on('dialog',dialog=>dialog.accept());
+    await page.locator('#serverSyncProfile').selectOption('2');
+    await page.locator('#serverSyncDelete').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('已删除'));
+    assert.equal(profiles.length,1); assert.deepEqual(errors,[]);
+    console.log('PASS: save, reload, switch, key masking, sync by profile ID, changed-host validation and deletion');
+  } finally { await browser.close(); }
+})().catch(error=>{console.error(error);process.exitCode=1});

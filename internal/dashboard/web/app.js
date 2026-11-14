@@ -77,7 +77,13 @@ async function api(path, data) {
     body: data === undefined ? undefined : JSON.stringify(data),
     cache: 'no-store'
   });
-  if (!response.ok) throw new Error(response.status === 403 ? '请刷新面板后重试' : '操作未完成，请稍后重试');
+  if (!response.ok) {
+    if (path === 'sync-profiles' && response.status === 400) {
+      const error = await response.json();
+      throw new Error(error.message || '服务器配置操作失败');
+    }
+    throw new Error(response.status === 403 ? '请刷新面板后重试' : '操作未完成，请稍后重试');
+  }
   return response.json();
 }
 function notice(message, error = false) {
@@ -1429,20 +1435,96 @@ setInterval(poll, 2500);
 setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
-$('serverSyncButton').addEventListener('click', () => {
-  if ($('serverSyncButton').disabled) return;
+let syncProfiles = [], syncConfigBusy = false;
+function syncFeedback(message, failed = false) {
+  $('serverSyncFeedback').textContent = message;
+  $('serverSyncFeedback').classList.toggle('error', failed);
+}
+function syncConfigLock(locked) {
+  syncConfigBusy = locked;
+  for (const element of $('serverSyncForm').querySelectorAll('input, select, button')) {
+    if (element.id !== 'serverSyncClose') element.disabled = locked;
+  }
+  $('serverSyncDelete').disabled = locked || !$('serverSyncProfile').value;
+}
+function selectSyncProfile(id) {
+  const profile = syncProfiles.find(item => item.id === id);
+  $('serverSyncProfile').value = profile?.id || '';
+  $('serverSyncURL').value = profile?.url || '';
+  $('serverSyncToken').value = '';
+  $('serverSyncToken').required = !profile?.key_saved;
+  $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : '';
+  $('serverSyncDelete').disabled = !profile;
+  syncFeedback('');
+}
+function renderSyncProfiles(data) {
+  syncProfiles = data.profiles;
+  const select = $('serverSyncProfile');
+  select.replaceChildren(new Option('新增服务器', ''));
+  syncProfiles.forEach((profile, index) => select.add(new Option(`${index + 1}. ${profile.url}`, profile.id)));
+  selectSyncProfile(data.selected);
+}
+async function saveSyncProfile() {
+  if (!$('serverSyncForm').reportValidity()) return null;
+  const data = await api('sync-profiles', {operation:'save', id:$('serverSyncProfile').value,
+    url:$('serverSyncURL').value.trim(), token:$('serverSyncToken').value});
+  $('serverSyncToken').value = '';
+  renderSyncProfiles(data);
+  return syncProfiles.find(item => item.id === data.selected);
+}
+$('serverSyncButton').addEventListener('click', async () => {
+  if ($('serverSyncButton').disabled || syncConfigBusy) return;
   serverSyncAccount = selectedAccount; serverSyncPID = current?.status?.pid || 0;
   $('serverSyncAccount').textContent = current?.login_account || current?.account || '当前账号';
+  selectSyncProfile('');
   $('serverSyncDialog').showModal();
+  syncConfigLock(true);
+  let loaded = false;
+  try { renderSyncProfiles(await api('sync-profiles')); loaded = true; }
+  catch (error) { syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); if (!loaded) for (const element of $('serverSyncForm').querySelectorAll('input, select, button')) { if (element.id !== 'serverSyncClose') element.disabled = true; } }
 });
 $('serverSyncClose').addEventListener('click', () => $('serverSyncDialog').close());
 $('serverSyncDialog').addEventListener('close', () => { $('serverSyncToken').value = ''; });
+$('serverSyncProfile').addEventListener('change', async () => {
+  const id = $('serverSyncProfile').value;
+  selectSyncProfile(id);
+  if (!id) return;
+  syncConfigLock(true);
+  try { await api('sync-profiles', {operation:'select', id}); }
+  catch (error) { syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); }
+});
+$('serverSyncURL').addEventListener('input', () => {
+  const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
+  const unchanged = profile?.url === $('serverSyncURL').value.trim().replace(/\/+$/, '');
+  $('serverSyncToken').required = !unchanged;
+  $('serverSyncToken').placeholder = unchanged ? '已加密保存，留空不更换' : '请输入此服务器的密钥';
+});
+$('serverSyncSave').addEventListener('click', async () => {
+  if (syncConfigBusy || !$('serverSyncForm').reportValidity()) return;
+  syncConfigLock(true);
+  try { await saveSyncProfile(); syncFeedback('配置已加密保存'); }
+  catch (error) { syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); }
+});
+$('serverSyncDelete').addEventListener('click', async () => {
+  if (syncConfigBusy || !$('serverSyncProfile').value || !confirm('删除这个服务器配置？')) return;
+  syncConfigLock(true);
+  try { renderSyncProfiles(await api('sync-profiles', {operation:'delete',id:$('serverSyncProfile').value})); syncFeedback('配置已删除'); }
+  catch (error) { syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); }
+});
 $('serverSyncForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (busy || selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) return;
-  const url = $('serverSyncURL').value.trim(), key = $('serverSyncToken').value;
-  if (!url.startsWith('https://') || key.length < 32) { notice('请填写 HTTPS 地址和至少 32 位的专用同步密钥', true); return; }
-  $('serverSyncToken').value = '';
-  $('serverSyncDialog').close();
-  await action('hme-server-sync', {note:url, code:key, label:current?.account || ''});
+  if (busy || syncConfigBusy || selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) return;
+  const account = serverSyncAccount, pid = serverSyncPID;
+  syncConfigLock(true);
+  try {
+    const profile = await saveSyncProfile();
+    if (!profile || !$('serverSyncDialog').open || selectedAccount !== account || current?.status?.pid !== pid) return;
+    $('serverSyncDialog').close();
+    await action('hme-server-sync', {profile_id:profile.id, note:profile.url, label:current?.account || ''});
+  } catch (error) { syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); }
 });
