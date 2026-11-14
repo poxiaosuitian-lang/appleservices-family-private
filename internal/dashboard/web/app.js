@@ -154,12 +154,12 @@ function tickCode() {
 function deviceIcon(device) {
   const label = (device.model + ' ' + device.name).toLowerCase();
   if (label.includes('windows')) {
-    return '<svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="6" y="7" width="12.5" height="12.5" rx="2.5" fill="#3b82f6"/><rect x="21.5" y="7" width="12.5" height="12.5" rx="2.5" fill="#2563eb"/><rect x="6" y="21.5" width="12.5" height="12.5" rx="2.5" fill="#60a5fa"/><rect x="21.5" y="21.5" width="12.5" height="12.5" rx="2.5" fill="#1d4ed8"/></svg>';
+    return '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4.5" y="4.5" width="8.5" height="8.5" rx="2" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.6"/><rect x="15" y="4.5" width="8.5" height="8.5" rx="2" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><rect x="4.5" y="15" width="8.5" height="8.5" rx="2" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><rect x="15" y="15" width="8.5" height="8.5" rx="2" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.6"/></svg>';
   }
   if (label.includes('iphone') || label.includes('ipad')) {
-    return '<svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="11" y="4" width="18" height="32" rx="4.5" fill="#1e293b"/><rect x="13" y="6.5" width="14" height="27" rx="2.8" fill="#dbeafe"/><path d="M13 24L27 10v23.5H13z" fill="#bfdbfe"/><rect x="17.5" y="8" width="5" height="1.8" rx="0.9" fill="#1e293b"/></svg>';
+    return '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="8" y="3.2" width="12" height="21.6" rx="3.2" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.65"/><path d="M12.2 6.2h3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.4 22h3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-opacity="0.55"/></svg>';
   }
-  return '<svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="6.5" y="7" width="27" height="19" rx="3" fill="#1e293b"/><rect x="8.8" y="9.2" width="22.4" height="14.6" rx="1.6" fill="#dbeafe"/><path d="M8.8 23.8L31.2 9.2v14.6z" fill="#bfdbfe"/><path d="M3.5 27.5h33l-2.4 3.5H5.9z" fill="#94a3b8"/><rect x="16" y="27.5" width="8" height="1.2" rx="0.6" fill="#64748b"/></svg>';
+  return '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4.5" y="5.5" width="19" height="13" rx="2.2" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.65"/><path d="M2.5 21.2h23" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><path d="M11.5 18.8h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-opacity="0.55"/></svg>';
 }
 
 function renderDevices(devices, status = current?.status || {}) {
