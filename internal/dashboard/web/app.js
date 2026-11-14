@@ -127,7 +127,7 @@ function codeIdleMessage(view) {
   const status = view?.status || {};
   if (status.state === 'awaiting_device_code' && status.local_verification === 'request_failed') return '验证码发送请求未完成，请改用其他验证方式';
   if (status.state === 'awaiting_device_code' && status.local_verification === 'failed') return '本机验证未完成，请使用受信任设备或短信验证码';
-  return status.running && status.authenticated && view?.control_ready && view.code_ready ? '点击按钮显示验证码' : '完成登录后可显示本机验证码';
+  return '';
 }
 function showCode(result) {
   privateCode = result.code;
@@ -176,7 +176,7 @@ function renderDevices(devices, status = current?.status || {}) {
     } else if (status?.running) {
       empty.textContent = '正在同步设备列表…';
     } else {
-      empty.textContent = '登录后，你的设备会显示在这里';
+      empty.textContent = '暂无设备';
     }
     grid.append(empty);
     return;
@@ -235,7 +235,7 @@ function renderStorage(info, { checkedAt = '', stale = false } = {}) {
   storageCheckedAt = checkedAt || '';
   const note = $('storageCacheNote'), visual = $('storageVisual');
   if (!info) {
-    $('storageSummary').textContent = '登录后查询当前容量和使用情况。';
+    $('storageSummary').textContent = '';
     note.textContent = '尚无本地状态';
     note.classList.remove('stale');
     if (visual) visual.hidden = true;
@@ -279,9 +279,11 @@ function renderFamily(info, { checkedAt = '', stale = false, animate = true } = 
   const shell = $('familyCard'), card = $('familyStatus'), metrics = $('familyMetrics'), map = $('familyMap'), controls = $('familyControls'), removeControls = $('familyRemoveControls');
   card.className = 'family-status';
   updateFamilyCacheMeta(checkedAt, stale, !!info);
+  $('familyDetail').textContent = '';
+  $('familySafety').textContent = '';
+  $('familySafety').hidden = true;
   if (!info) {
     $('familySummary').textContent = '尚未读取家庭状态';
-    $('familyDetail').textContent = '操作前自动核验家庭状态。';
     $('familyStatusChip').textContent = '待读取';
     metrics.hidden = true; map.hidden = true; controls.hidden = true; removeControls.hidden = true;
     return;
@@ -299,16 +301,13 @@ function renderFamily(info, { checkedAt = '', stale = false, animate = true } = 
   if (info.member) {
     card.classList.add(info.organizer ? 'organizer' : 'member');
     $('familySummary').textContent = info.organizer ? '当前账号是家庭母号' : '已加入家庭 · ' + info.members + ' 位成员';
-    $('familyDetail').textContent = info.organizer ? '已确认组织者身份。' : '已确认成员身份。';
     $('familyStatusChip').textContent = info.organizer ? '母号' : '家庭成员';
   } else if (info.eligibility_known && info.eligible) {
     card.classList.add('eligible');
     $('familySummary').textContent = '尚未加入家庭 · 当前可加入';
-    $('familyDetail').textContent = '请选择家庭组织者。';
     $('familyStatusChip').textContent = '可加入';
   } else {
     $('familySummary').textContent = '当前没有可确认的家庭成员资格';
-    $('familyDetail').textContent = info.eligibility_known ? 'Apple 当前未确认可加入家庭。' : 'Apple 没有返回明确的家庭资格。';
     $('familyStatusChip').textContent = '未确认';
   }
   $('familyMemberCount').textContent = info.members || '0';
@@ -323,10 +322,6 @@ function renderFamily(info, { checkedAt = '', stale = false, animate = true } = 
     $('familyCurrentAvatar').textContent = (currentName || 'A').slice(0, 1).toUpperCase();
     map.classList.toggle('self-organizer', !!info.organizer);
   }
-  const sharing = [];
-  sharing.push(info.purchase_sharing_known ? (info.purchase_sharing_enabled ? '购买共享已开启' : '购买共享已关闭') : '未请求购买共享');
-  sharing.push(info.location_sharing_known ? (info.location_sharing_enabled ? '位置共享已开启' : '位置共享已关闭') : '未请求位置共享');
-  $('familySafety').textContent = sharing.join(' · ') + '。';
   if (animate) {
     shell.classList.remove('family-updated');
     requestAnimationFrame(() => shell.classList.add('family-updated'));
@@ -351,7 +346,7 @@ function renderActivation(view) {
   card.hidden = !ready;
   if (!ready) return;
   $('activationState').textContent = activationInfo?.required ? '需要同意条款' : '待检查';
-  $('activationSummary').textContent = activationInfo?.required ? '请先阅读并同意 Apple 条款，再继续激活。' : '检查并同意 Apple 条款后继续激活。';
+  $('activationSummary').textContent = '';
   const versions = activationInfo?.required ? '地区 ' + activationInfo.region + ' · iCloud ' + activationInfo.icloud_version + ' · 媒体服务 ' + (activationInfo.media_version || '无更新') : '';
   $('activationVersions').textContent = versions;
   $('activationVersions').hidden = !versions;
@@ -400,7 +395,8 @@ function renderHMEForwarding(info) {
   }
   if (selected) select.value = selected;
   const hasAlternative = options.some(value => value.toLowerCase() !== selected.toLowerCase());
-  $('hmeForwardHint').textContent = hasAlternative ? '修改后应用于全部隐私邮箱。' : '暂无其他已验证邮箱，可在下方添加。';
+  $('hmeForwardHint').textContent = '';
+  $('hmeForwardHint').hidden = true;
   select.disabled = !hasAlternative;
   $('hmeForwardButton').disabled = busy || !hasAlternative || !selected || select.value.toLowerCase() === selected.toLowerCase();
 }
@@ -662,8 +658,8 @@ function renderSecurityQuestions(view, ready) {
     }
   }
   $('securityQuestionsSummary').textContent = status?.blocked ? (status.blocked_reason === 'rejected' ? 'Apple 未接受上次答案，已暂停自动提交。请修正答案后保存。' : status.blocked_reason === 'additional-verification' ? '答案已加密保存，Apple 仍要求后续安全验证。请在 Apple 账户页面完成后，点击读取验证问题继续。' : '上次安全验证未完成，已暂停自动提交。请检查账号状态后再点击读取验证问题。')
-    : questions.length ? '已保存 ' + questions.filter(q => q.saved).length + ' / ' + questions.length + ' 个答案；需要时按问题编号自动验证。'
-    : 'Apple 要求密保验证时，这里会显示具体题目。答案按账号独立加密保存在本机，之后自动使用。';
+    : questions.length ? '已保存 ' + questions.filter(q => q.saved).length + ' / ' + questions.length + ' 个答案'
+    : '';
   $('securityQuestionsRead').disabled = busy || !ready;
   $('securityQuestionsSave').disabled = busy || !ready || !questions.length;
   $('securityQuestionsClear').disabled = busy || !ready || !questions.some(q => q.saved);
@@ -698,7 +694,7 @@ function render(view) {
   const localVerificationFailed = status.state === 'awaiting_device_code' && status.local_verification === 'failed';
   const localVerificationRequestFailed = status.state === 'awaiting_device_code' && status.local_verification === 'request_failed';
   const mail = view.primary_mail, mailWorking = ['checking', 'submitted'].includes(mail?.phase) && online && Date.now() - Date.parse(mail?.updated_at || '') < 120000;
-  $('primaryMailSummary').textContent = mail?.message || '新导入账号登录后自动检查；已有邮箱直接复用，没有则自动创建。';
+  $('primaryMailSummary').textContent = mail?.message || '尚未检查';
   $('primaryMailAddress').textContent = mail?.email || '';
   $('primaryMailAddress').hidden = !mail?.email;
   $('primaryMailCheck').disabled = busy || !online || !view.control_ready || mailWorking;
@@ -721,27 +717,27 @@ function render(view) {
     storeAuthAccount = selectedAccount;
     storeAuthPID = status.pid || 0;
     storeAuthRefresh = status.last_refresh_at || '';
-    $('storeAuthSummary').textContent = '购买会话尚未验证 · 点击验证购买会话后继续';
+    $('storeAuthSummary').textContent = '未验证';
   }
   if (typeof view.store_session_ready === 'boolean') {
     const wasReady = storeAuthReady;
     storeAuthReady = !!view.store_session_ready && !!online && !!view.control_ready;
     storeAuthRefresh = status.last_refresh_at || '';
-    if (storeAuthReady) $('storeAuthSummary').textContent = '购买会话已保留 · 同一账号登录续期后继续使用 · Apple 仍可能要求重新验证';
+    if (storeAuthReady) $('storeAuthSummary').textContent = '已验证';
     else if (wasReady) $('storeAuthSummary').textContent = '购买会话不可用，请重新验证购买会话。';
   }
 
   if (giftOwner !== selectedAccount || giftPID !== (status.pid || 0) || !online) {
     giftPreparation = '';
     $('giftCode').value = '';
-    $('giftResult').textContent = '先检查当前账号的兑换会话；会话检查不会提交兑换。';
+    $('giftResult').textContent = '';
     giftOwner = selectedAccount;
     giftPID = status.pid || 0;
   }
   $('giftPrepareButton').disabled = busy || !online || !view.control_ready || !view.gift_card_available;
   $('giftCode').disabled = busy || !giftPreparation;
   $('giftRedeemButton').disabled = busy || !online || !view.control_ready || !giftPreparation || !/^X[A-Z0-9]{15}$/.test($('giftCode').value.trim().toUpperCase());
-  if (online && !view.gift_card_available) $('giftResult').textContent = '请重新连接当前账号加载礼品卡兑换功能。';
+  if (online && !view.gift_card_available) $('giftResult').textContent = '请重新连接当前账号';
 
   const titles = {
     initializing: '正在初始化本机身份',
@@ -759,7 +755,7 @@ function render(view) {
     verifying_pairing: '正在验证设备配对'
   };
   $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户'));
-  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '账户会话仍保留，后台正在恢复推送连接。' : '设备身份已保留，后台会自动保持登录。') : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : starting ? '正在恢复这台电脑的设备身份，请稍等。' : status.state === 'failed' ? '本次登录未完成，设备身份和已保存的会话仍保留。请重新连接。' : activated ? '已保留此前通过验收的 iCloud 会话；当前后台尚未登录。' : '登录后，即可查看设备和生成本机验证码。';
+  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
 
   const pairingStates = {
     awaiting_approval: '收到官方客户端配对请求，请在登录请求中允许。',
@@ -802,7 +798,7 @@ function render(view) {
   $('stopButton').hidden = !status.running;
   $('stopButton').disabled = busy;
 
-  $('sessionHint').textContent = online ? '上次续期 ' + time(status.last_refresh_at) : waiting ? '当前登录尚未完成验证' : activated ? '已保留此前验收会话' : '登录身份会在本机保留';
+  $('sessionHint').textContent = online ? '上次续期 ' + time(status.last_refresh_at) : '';
   $('deviceCount').textContent = status.device_count || '—';
   $('navCount').textContent = status.device_count || '—';
 
@@ -821,7 +817,7 @@ function render(view) {
     $('purchaseButton').textContent = '开通 50GB · ' + purchaseLabel;
   }
 
-  const cloudHint = hasPaidStorage(view) ? 'iCloud+ 已开通 · 付费容量 ' + gib(view.storage.paid_bytes) + '。可查询储存空间更新使用情况。' : !online ? '请先在概览中连接账户并完成验证。已有激活会话可查询容量和方案，开通订阅仍需后台在线。' : !view.control_ready ? '账户已登录，正在等待后台控制连接。' : busy ? '正在处理当前操作，请稍候。' : !purchaseAction ? '请先读取可购方案；仅支持已核验的 50GB 币种与价格。' : purchaseAction === 'storage-skill-purchase-us' && !storeAuthReady ? '点击开通将先自动检查购买会话、报价和现有订阅，通过后再由你确认扣款。' : '报价已核验，可确认开通；Apple 可能要求验证购买会话。';
+  const cloudHint = hasPaidStorage(view) ? 'iCloud+ 已开通 · ' + gib(view.storage.paid_bytes) : !online ? '账户未在线' : !view.control_ready ? '等待后台连接' : busy ? '正在处理…' : !purchaseAction ? '待读取方案' : purchaseAction === 'storage-skill-purchase-us' && !storeAuthReady ? '可开通 · ' + purchaseLabel : '报价已核验 · ' + purchaseLabel;
   $('icloudAccessHint').textContent = cloudHint;
   $('purchaseAvailability').textContent = cloudHint;
   $('icloudLoginLink').hidden = online;
@@ -868,7 +864,7 @@ function render(view) {
   $('pairingCode').disabled = busy || status.state === 'verifying_pairing';
   $('pairingForm').querySelector('button').disabled = busy || status.state === 'verifying_pairing';
 
-  $('deviceUpdate').textContent = status.last_device_query_at && !status.last_device_query_at.startsWith('0001') ? '最近同步 ' + time(status.last_device_query_at) + ' · ' + status.device_count + ' 台设备' : '设备列表与 Apple 账户同步';
+  $('deviceUpdate').textContent = status.last_device_query_at && !status.last_device_query_at.startsWith('0001') ? '最近同步 ' + time(status.last_device_query_at) + ' · ' + status.device_count + ' 台设备' : '尚未同步';
   renderDevices(view.devices);
 
   const pending = view.pending;
@@ -1232,7 +1228,7 @@ $('giftPrepareButton').addEventListener('click', () => {
   if (busy) return;
   giftPreparation = '';
   $('giftCode').value = '';
-  $('giftResult').textContent = '正在验证当前账号的兑换会话，尚未提交兑换…';
+  $('giftResult').textContent = '正在验证兑换会话…';
   action('gift-prepare');
 });
 $('giftCode').addEventListener('input', () => { if (current) render(current); });
@@ -1276,7 +1272,7 @@ $('storeAuthButton').addEventListener('click', () => {
   storeAuthReady = false;
   giftPreparation = '';
   if (current) current.store_session_ready = false;
-  $('storeAuthSummary').textContent = '正在验证购买会话，Apple 如要求验证码将由当前本机身份完成，请稍候…';
+  $('storeAuthSummary').textContent = '正在验证购买会话…';
   action('storage-skill-auth-local');
 });
 $('addAccountButton').addEventListener('click', () => openLogin('add'));

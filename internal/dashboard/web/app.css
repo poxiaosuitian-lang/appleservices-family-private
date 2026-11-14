@@ -954,6 +954,19 @@ html[data-theme="dark"] .theme-button .icon-moon {
   line-height: 1.5;
 }
 
+.card-description:empty,
+.cache-note:empty,
+.session-body p:empty,
+.session-hint:empty,
+.code-detail:empty,
+.family-status p:empty,
+.family-safety:empty,
+.request-content p:empty {
+  display: none;
+  margin: 0;
+  padding: 0;
+}
+
 .cache-note.stale {
   color: var(--amber);
   font-weight: 500;
@@ -1226,6 +1239,10 @@ input[readonly] {
   letter-spacing: -0.02em;
 }
 
+.session-copy:has(> p:empty) h2 {
+  margin-bottom: 0;
+}
+
 .session-body p {
   max-width: 480px;
   margin: 0;
@@ -1343,7 +1360,7 @@ input[readonly] {
 .code-chamber {
   flex: 1;
   margin: 14px 0;
-  padding: 16px 12px 12px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1392,9 +1409,13 @@ input[readonly] {
   animation: codeReveal 0.28s cubic-bezier(0.2, 0.85, 0.3, 1);
 }
 
+.code-display:not(.shown) + .code-timer-track {
+  display: none;
+}
+
 .code-timer-track {
   height: 3.5px;
-  margin: 12px 10px 8px;
+  margin: 12px 10px 0;
   border-radius: 999px;
   background: var(--surface-muted);
   overflow: hidden;
@@ -1412,7 +1433,7 @@ input[readonly] {
 }
 
 .code-detail {
-  min-height: 18px;
+  margin-top: 8px;
   color: var(--muted);
   font-size: 11.5px;
   text-align: center;
@@ -1506,6 +1527,21 @@ input[readonly] {
   margin-top: 0;
   display: flex;
   flex-direction: column;
+}
+
+.mail-card > .button-row {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+#securityQuestionsForm {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+#securityQuestionsForm > .button-row {
+  margin-top: 14px;
 }
 
 .mail-address-pill {
@@ -1897,15 +1933,30 @@ input[readonly] {
   margin-top: 6px;
 }
 
-.gift-step-actions {
-  margin-top: 10px;
-}
-
-#giftRedeemForm {
+.gift-controls-row {
   margin-top: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.gift-controls-row > #giftPrepareButton {
+  height: 38px;
+  flex-shrink: 0;
+}
+
+#giftRedeemForm {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#giftRedeemButton {
+  height: 38px;
+  flex-shrink: 0;
 }
 
 #giftCode {
@@ -1916,8 +1967,13 @@ input[readonly] {
 }
 
 #giftResult {
-  margin-top: auto;
-  padding-top: 10px;
+  margin-top: 8px;
+  padding-top: 0;
+}
+
+#giftResult:empty {
+  display: none;
+  margin: 0;
 }
 
 /* ==========================================================================
@@ -2329,7 +2385,7 @@ input[readonly] {
 
 .hme-reachable strong {
   display: block;
-  margin-top: 2px;
+  margin-top: 0;
   color: var(--text);
   font-size: 12.5px;
 }
@@ -3286,6 +3342,13 @@ body.ui-ready .lower-grid {
   .hme-candidate,
   .hme-row {
     grid-template-columns: 1fr;
+  }
+  .gift-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gift-controls-row > #giftPrepareButton {
+    width: 100%;
   }
   .icloud-steps {
     width: 100%;

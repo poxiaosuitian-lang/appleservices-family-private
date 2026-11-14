@@ -145,7 +145,6 @@
         </span>
         <div>
           <h2>开通 iCloud+ 50GB</h2>
-          <p class="cache-note">当前支持已核验的 50GB 方案，以 Apple 实时返回报价为准。确认订阅会产生真实扣款并自动续费。</p>
         </div>
       </div>
       <div class="icloud-intro-right">
@@ -171,7 +170,7 @@
       <div class="session-body">
         <div class="session-copy">
           <h2 id="sessionTitle">连接你的设备</h2>
-          <p id="sessionDescription">正在读取本机后台状态…</p>
+          <p id="sessionDescription"></p>
         </div>
         <div class="enclave-emblem" aria-hidden="true">
           <svg viewBox="0 0 88 88" fill="none">
@@ -201,7 +200,7 @@
         <button class="button button-primary" type="button" id="startButton">连接账户</button>
         <button class="button button-light" type="button" id="renewButton" hidden>验证 Apple 账户</button>
         <button class="quiet-button" type="button" id="stopButton" hidden>停止后台</button>
-        <span class="session-hint" id="sessionHint">登录身份会在本机保留</span>
+        <span class="session-hint" id="sessionHint"></span>
       </div>
     </article>
 
@@ -216,7 +215,6 @@
           </span>
           <div>
             <h2>验证码</h2>
-            <p class="cache-note">双重认证安全码</p>
           </div>
         </div>
       </div>
@@ -231,7 +229,7 @@
             <rect id="codeTimerFill" x="0" y="0" width="0" height="4" rx="2"/>
           </svg>
         </div>
-        <div class="code-detail" id="codeDetail">完成登录后可显示本机验证码</div>
+        <div class="code-detail" id="codeDetail"></div>
       </div>
       <div class="code-actions">
         <button class="button button-primary" type="button" id="codeButton" disabled>显示验证码</button>
@@ -273,7 +271,7 @@
       </div>
       <span class="subtle-tag" id="activationState">待检查</span>
     </div>
-    <p id="activationSummary" class="card-description">检查并同意 Apple 条款后继续激活。</p>
+    <p id="activationSummary" class="card-description"></p>
     <p id="activationVersions" class="cache-note" hidden></p>
     <div class="commerce-actions">
       <a class="text-button" id="activationICloudTerms" target="_blank" rel="noopener" hidden>查看 iCloud 条款 ↗</a>
@@ -309,13 +307,12 @@
         </div>
         <button class="button button-light button-sm" type="button" id="primaryMailCheck" disabled>检查邮箱状态</button>
       </div>
-      <p id="primaryMailSummary" class="card-description" role="status">新导入账号登录后自动检查；已有邮箱直接复用，没有则自动创建。</p>
+      <p id="primaryMailSummary" class="card-description" role="status">尚未检查</p>
       <p id="primaryMailAddress" class="mail-address-pill" hidden></p>
       <div class="button-row">
         <button class="button button-light button-sm" type="button" id="primaryMailEnsure" disabled>检查并创建邮箱</button>
         <a class="button button-light button-sm" href="https://www.icloud.com/mail/" target="_blank" rel="noopener noreferrer">打开 iCloud 邮件 ↗</a>
       </div>
-      <p class="cache-note card-foot-note">默认使用账号前缀，重名时添加短后缀。需要额外验证时，请在 Apple 页面完成后再检查。</p>
     </section>
 
     <section class="request-card icloud-panel security-card" id="securityQuestionsCard">
@@ -333,7 +330,7 @@
         </div>
         <button class="button button-light button-sm" id="securityQuestionsRead" type="button" disabled>读取验证问题</button>
       </div>
-      <p class="card-description" id="securityQuestionsSummary" role="status">Apple 要求密保验证时，这里会显示具体题目。答案按账号独立加密保存在本机，之后自动使用。</p>
+      <p class="card-description" id="securityQuestionsSummary" role="status"></p>
       <form id="securityQuestionsForm" autocomplete="off">
         <div id="securityQuestionsFields"></div>
         <div class="button-row">
@@ -341,7 +338,6 @@
           <button class="button button-light button-sm" id="securityQuestionsClear" type="button" disabled>清除已保存答案</button>
         </div>
       </form>
-      <p class="cache-note card-foot-note">已保存的答案不回显。留空保留原答案；答案错误需修改后重试，额外安全验证请在 <a class="inline-link" href="https://account.apple.com/" target="_blank" rel="noopener noreferrer">Apple 账户页面</a> 完成。</p>
     </section>
   </div>
 
@@ -360,7 +356,7 @@
       </div>
       <button class="button button-light button-sm" type="button" id="storageButton" disabled>查询储存空间</button>
     </div>
-    <p id="storageSummary" class="card-description storage-headline">登录后查询当前容量和使用情况。</p>
+    <p id="storageSummary" class="card-description storage-headline"></p>
     <div class="storage-meter" id="storageVisual" hidden>
       <div class="storage-bar-track" aria-hidden="true">
         <svg viewBox="0 0 1000 10" preserveAspectRatio="none">
@@ -400,11 +396,11 @@
     <div class="commerce-status-grid">
       <div class="commerce-status-box">
         <small>资格与报价核验</small>
-        <p id="purchaseAvailability" role="status">登录后读取 Apple 报价，即可核对是否能开通。</p>
+        <p id="purchaseAvailability" role="status">未核验</p>
       </div>
       <div class="commerce-status-box">
         <small>购买会话状态</small>
-        <p id="storeAuthSummary">购买会话尚未验证 · 临时会话不会持久化</p>
+        <p id="storeAuthSummary">未验证</p>
       </div>
     </div>
 
@@ -418,16 +414,15 @@
           <h4>兑换礼品卡</h4>
           <span class="subtle-tag">16 位充值卡</span>
         </div>
-        <p class="card-description">请输入 16 位充值礼品卡代码，非订阅优惠码。确认兑换后将消耗卡码。</p>
-        <div class="gift-step-actions">
-          <button class="button button-light button-sm" type="button" id="giftPrepareButton" disabled>1. 检查兑换会话</button>
+        <div class="gift-controls-row">
+          <button class="button button-light" type="button" id="giftPrepareButton" disabled>1. 检查兑换会话</button>
+          <form id="giftRedeemForm" autocomplete="off">
+            <label for="giftCode" class="sr-only">礼品卡兑换码</label>
+            <input id="giftCode" type="password" maxlength="16" autocomplete="off" spellcheck="false" placeholder="先检查兑换会话" disabled>
+            <button class="button button-primary" type="submit" id="giftRedeemButton" disabled>2. 确认兑换</button>
+          </form>
         </div>
-        <form id="giftRedeemForm" autocomplete="off">
-          <label for="giftCode" class="sr-only">礼品卡兑换码</label>
-          <input id="giftCode" type="password" maxlength="16" autocomplete="off" spellcheck="false" placeholder="先检查兑换会话" disabled>
-          <button class="button button-primary" type="submit" id="giftRedeemButton" disabled>2. 确认兑换</button>
-        </form>
-        <p class="cache-note" id="giftResult" role="status">会话检查不验证卡码、不查询余额；兑换码不写入日志或本地存储。</p>
+        <p class="cache-note" id="giftResult" role="status"></p>
       </div>
     </div>
   </section>
@@ -457,7 +452,7 @@
       <span class="family-state-dot"></span>
       <div class="family-status-copy">
         <strong id="familySummary">尚未读取家庭状态</strong>
-        <p id="familyDetail">操作前自动核验家庭状态。</p>
+        <p id="familyDetail"></p>
       </div>
       <span class="family-status-chip" id="familyStatusChip">待读取</span>
     </div>
@@ -493,12 +488,12 @@
     </div>
 
     <div class="family-remove-controls" id="familyRemoveControls" hidden>
-      <div><strong>家庭成员管理</strong><small>移出后立即停止共享 iCloud+</small></div>
+      <div><strong>家庭成员管理</strong></div>
       <select id="familyRemoveMember" aria-label="要移出的家庭成员"></select>
       <button class="button button-danger button-sm" type="button" id="familyRemoveButton" disabled>移出家庭</button>
     </div>
 
-    <p class="family-safety" id="familySafety">不会开启购买共享和位置共享。</p>
+    <p class="family-safety" id="familySafety" hidden></p>
   </section>
 
   <section class="request-card overview-only hme-card" id="hmeCard" hidden>
@@ -530,7 +525,7 @@
       <div>
         <small>所有隐私邮箱统一转发到</small>
         <strong id="hmeForwardCurrent">—</strong>
-        <p id="hmeForwardHint">Apple 只允许选择已关联并验证的账户邮箱。</p>
+        <p id="hmeForwardHint" hidden></p>
       </div>
       <select id="hmeForwardSelect" aria-label="默认转发邮箱"></select>
       <button class="button button-light button-sm" type="button" id="hmeForwardButton" disabled>保存转发目标</button>
@@ -539,8 +534,7 @@
 
     <div class="hme-reachable" id="hmeReachablePanel" hidden>
       <div>
-        <small>添加转发邮箱</small>
-        <strong>添加并验证后自动切换全部隐私邮箱</strong>
+        <strong>添加转发邮箱</strong>
       </div>
       <input id="hmeReachableEmail" type="email" maxlength="254" autocomplete="off" placeholder="输入目标转发邮箱" aria-label="要添加的账户邮箱">
       <button class="button button-light button-sm" type="button" id="hmeReachableStartButton" disabled>发送邮箱验证码</button>
@@ -583,7 +577,7 @@
         <span class="devices-count-pill">已关联设备 <strong id="deviceCount">—</strong></span>
         <span class="section-footnote">
           <span class="footnote-dot"></span>
-          <span id="deviceUpdate">设备列表与 Apple 账户同步</span>
+          <span id="deviceUpdate">尚未同步</span>
         </span>
       </div>
       <button class="button button-light button-sm" type="button" id="devicesButton" disabled>刷新设备列表</button>
@@ -633,7 +627,7 @@
         </div>
       </div>
       <div id="activityList" class="activity-list">
-        <p class="empty-activity">状态变化会实时记录在这里</p>
+        <p class="empty-activity">暂无动态</p>
       </div>
     </article>
   </section>
@@ -656,14 +650,12 @@
       <button class="dialog-close" type="button" id="closeLogin" aria-label="关闭">×</button>
     </div>
     <h2>连接 Apple 账户</h2>
-    <p class="dialog-subtitle">关闭页面后，后台仍会保持登录。</p>
     <label for="appleID">Apple 账户邮箱</label>
     <input id="appleID" name="apple_id" type="email" autocomplete="username" placeholder="name@example.com" required>
     <label for="password">账户密码</label>
     <input id="password" name="password" type="password" autocomplete="off" placeholder="输入 Apple 账户密码" required>
     <div class="dialog-option-box">
-      <label class="remember-login"><input id="rememberPassword" type="checkbox"> <span>在此电脑加密记住密码，用于会话失效后自动重连</span></label>
-      <p class="cache-note">新账号连接成功后会自动检查 iCloud 主邮箱；没有则按账号前缀创建，已有邮箱不变。</p>
+      <label class="remember-login"><input id="rememberPassword" type="checkbox"> <span>在此电脑加密记住密码</span></label>
     </div>
     <label for="twofactor">首次双重验证方式</label>
     <select id="twofactor" name="twofactor">
@@ -688,7 +680,6 @@
       <div></div>
     </div>
     <h2>停止保持登录？</h2>
-    <p class="dialog-subtitle">停止后将暂停验证码推送和自动续期，已保存的登录信息会保留。</p>
     <div class="dialog-actions">
       <button class="button button-outline" type="button" id="cancelStop">保持在线</button>
       <button class="button button-danger" type="button" id="confirmStop">停止后台</button>
