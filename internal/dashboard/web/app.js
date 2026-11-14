@@ -1097,6 +1097,7 @@ async function action(name, extra = {}, options = {}) {
       renderPlans(result.storage_plan, { checkedAt, stale: false });
     }
     if (result.hide_my_email) renderHME(result.hide_my_email);
+    if (result.stage === 'hme-forward-pending') $('hmeSummary').textContent = result.message;
     if (result.stage === 'hme-reachable-code') { $('hmeReachableCodeForm').hidden = false; $('hmeReachableEmail').readOnly = true; $('hmeReachableCode').focus(); }
     if (['hme-reachable-completed', 'hme-reachable-added'].includes(result.stage)) { $('hmeReachableCodeForm').hidden = true; $('hmeReachableEmail').readOnly = false; $('hmeReachableCode').value = ''; }
     if (result.hme_candidate) showHMECandidate(result.hme_candidate);

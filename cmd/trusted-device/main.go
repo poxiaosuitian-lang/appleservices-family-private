@@ -648,6 +648,7 @@ func run() (runErr error) {
 		}
 		return hmeClient.List(actionCtx)
 	}
+	autoHMEForward := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
 		if action == "security-resume" {
 			if err := securityAnswers.resume(); err != nil {
@@ -719,8 +720,8 @@ func run() (runErr error) {
 				return control.Result{Message: "标签、备忘录或邮箱地址过长", Stage: "hme-validation"}
 			}
 			switch action {
-			case "hme-list":
-				return control.Result{OK: true, Message: "已读取当前子号的隐藏邮件地址", Stage: "hme-list", HideMyEmail: info}
+			case "hme-list", "hme-auto-forward":
+				return automaticHMEForwardResult(queryCtx, *dir, appleID, hmeClient, info, "已读取隐藏邮件地址", "hme-list")
 			case "hme-generate":
 				candidate, generateErr := hmeClient.Generate(queryCtx, "zh-cn")
 				if generateErr != nil {
@@ -741,7 +742,7 @@ func run() (runErr error) {
 					stopReadback()
 					if readbackErr == nil && reservedAliasPresent(readback, pendingHMECandidate, label, note) {
 						pendingHMECandidate = ""
-						return control.Result{OK: true, Message: "隐藏邮件地址已创建；Apple 创建响应异常，但已通过实时列表回读确认", Stage: "hme-reserve-reconciled", HideMyEmail: readback}
+						return automaticHMEForwardResult(queryCtx, *dir, appleID, hmeClient, readback, "隐藏邮件地址已创建并通过实时列表回读", "hme-reserve-reconciled")
 					}
 					return control.Result{Message: "候选地址未确认创建；请刷新列表后核对，不要重复提交", Stage: "hme-reserve"}
 				}
@@ -756,6 +757,9 @@ func run() (runErr error) {
 				readback, readbackErr := hmeClient.List(queryCtx)
 				if readbackErr != nil || readback == nil || !strings.EqualFold(strings.TrimSpace(readback.SelectedForward), alias) {
 					return control.Result{Message: "Apple 已接收更新，但默认转发邮箱尚未通过回读确认；请勿重复提交", Stage: "hme-forward-readback"}
+				}
+				if err := writeJSONFile(filepath.Join(*dir, "hme-forward.json"), hmeForwardState{AppleID: appleID, Target: alias, Done: true}); err != nil {
+					return control.Result{OK: true, Message: "转发已更新，但手动设置未能保存到本机，请重新核对", Stage: "hme-forward-pending", HideMyEmail: readback}
 				}
 				return control.Result{OK: true, Message: "默认转发邮箱已更新，并通过 Apple 实时列表回读", Stage: "hme-forward-completed", HideMyEmail: readback}
 			case "hme-reachable-start":
@@ -855,6 +859,9 @@ func run() (runErr error) {
 				return control.Result{Message: "操作已提交，但列表回读未完成；请勿重复操作", Stage: "hme-readback"}
 			}
 			messages := map[string]string{"hme-reserve": "隐藏邮件地址已创建并通过列表回读", "hme-update": "标签和备忘录已更新", "hme-deactivate": "隐藏邮件地址已停用", "hme-reactivate": "隐藏邮件地址已恢复", "hme-delete": "隐藏邮件地址已永久删除"}
+			if action == "hme-reserve" {
+				return automaticHMEForwardResult(queryCtx, *dir, appleID, hmeClient, info, messages[action], action+"-completed")
+			}
 			return control.Result{OK: true, Message: messages[action], Stage: action + "-completed", HideMyEmail: info}
 		}
 		if action == "storage-preview" {
@@ -1020,7 +1027,9 @@ func run() (runErr error) {
 			defer done()
 			target := appleservices.PurchaseTarget{Bytes: 50 * 1024 * 1024 * 1024, PriceMinor: 99, Currency: "USD", Period: "month"}
 			purchase, err := buyer.SubmitSkillStoragePurchase(queryCtx, target, "290571")
-			return skillStoragePurchaseResult(purchase, err)
+			result := skillStoragePurchaseResult(purchase, err)
+			queueHMEForwardAfterPurchase(result, autoHMEForward)
+			return result
 		}
 		if action == "family-info" || action == "family-add-self" || action == "family-join-storage" {
 			executable, execErr := os.Executable()
@@ -1420,9 +1429,15 @@ func run() (runErr error) {
 	}
 	for {
 		select {
+		case <-autoHMEForward:
+			// Run after replying to the verified purchase, so web authentication
+			// cannot turn a completed subscription into an HTTP timeout.
+			performAction(ctx, "hme-auto-forward", "", "", "", "", nil)
 		case <-autoMail:
 			autoMail = nil // once per successful connection; no polling/retry loop
-			performAction(ctx, "mail-ensure", "", "", "", "", nil)
+			if task, err := mailsetup.Load(*dir, appleID); err == nil && task.Phase != "ready" {
+				performAction(ctx, "mail-ensure", "", "", "", "", nil)
+			}
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) || (*listenFor > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 				return nil
