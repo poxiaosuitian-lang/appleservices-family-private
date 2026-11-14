@@ -78,7 +78,7 @@ async function api(path, data) {
     cache: 'no-store'
   });
   if (!response.ok) {
-    if (path === 'sync-profiles' && response.status === 400) {
+    if ((path === 'sync-profiles' || path === 'sync-recovery') && response.status === 400) {
       const error = await response.json();
       throw new Error(error.message || '服务器配置操作失败');
     }
@@ -1478,6 +1478,8 @@ function selectSyncProfile(id) {
   $('serverSyncToken').required = !profile?.key_saved;
   $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : '';
   $('serverSyncDelete').disabled = !profile;
+  $('serverRecoveryEnabled').checked = profile?.recovery_enabled ?? true;
+  $('serverRecoveryStatus').textContent = profile?.recovery_enabled ? (profile.recovery_status?.message || '已启用，等待服务器请求') : '';
   syncFeedback('');
 }
 function renderSyncProfiles(data) {
@@ -1549,6 +1551,7 @@ $('serverSyncForm').addEventListener('submit', async event => {
   busy = true;
   try {
     const pending = syncPending;
+    const recoveryEnabled = $('serverRecoveryEnabled').checked;
     const profile = syncImported || await saveSyncProfile();
     if (!profile || !sameSession()) return;
     if (!syncImported) {
@@ -1578,6 +1581,8 @@ $('serverSyncForm').addEventListener('submit', async event => {
       $('serverSyncSubmit').textContent = '完成服务器登录';
       throw new Error(result.message || '服务器新通道尚未就绪');
     }
+    await api('sync-recovery', {profile_id:profile.id,url:profile.url,enabled:recoveryEnabled});
+    if (!sameSession()) return;
     $('serverSyncDialog').close();
     notice(result.message || 'Web、IMAP 和 Apple 新通道均已就绪');
   } catch (error) { if (sameSession()) syncFeedback(error.message, true); }
@@ -1586,4 +1591,17 @@ $('serverSyncForm').addEventListener('submit', async event => {
     if (current) render(current);
     if (sameSession() && syncPending) $('serverSyncOTP').focus();
   }
+});
+
+$('serverRecoveryEnabled').addEventListener('change', async () => {
+  const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
+  if (!profile) return;
+  const enabled = $('serverRecoveryEnabled').checked;
+  syncConfigLock(true);
+  try {
+    await api('sync-recovery', {profile_id:profile.id,url:profile.url,enabled});
+    profile.recovery_enabled = enabled;
+    $('serverRecoveryStatus').textContent = enabled ? '已启用，等待服务器请求' : '已关闭';
+  } catch (error) { $('serverRecoveryEnabled').checked = !enabled; syncFeedback(error.message, true); }
+  finally { syncConfigLock(false); }
 });

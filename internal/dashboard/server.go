@@ -49,6 +49,8 @@ type Server struct {
 	accounts       []*Account
 	accountsMu     sync.Mutex
 	syncProfilesMu sync.Mutex
+	syncActionMu   sync.Mutex
+	recoveryStatus sync.Map
 	// registryNote reports why the account list could not be loaded, so a
 	// failure is surfaced instead of silently presenting an empty list.
 	registryNote string
@@ -1040,6 +1042,7 @@ func (s *Server) setMessage(account *Account, message string) {
 }
 
 func (s *Server) Bootstrap(ctx context.Context, appleID, password string) {
+	go s.runRecoveryListeners(ctx)
 	if appleID != "" && password != "" {
 		go func() {
 			result := s.Start(ctx, credentials{AppleID: appleID, Password: password})
@@ -1132,6 +1135,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			json.NewEncoder(w).Encode(s.snapshotFor(ctx, r.URL.Query().Get("account")))
 			return
+		case r.Method == "POST" && r.URL.Path == "/api/sync-recovery":
+			s.serveSyncRecovery(w, r)
+			return
 		case r.URL.Path == "/api/sync-profiles" && (r.Method == "GET" || r.Method == "POST"):
 			s.serveSyncProfiles(w, r)
 			return
@@ -1209,6 +1215,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			action := input.Action
+			if action.Action == "hme-server-sync" || strings.HasPrefix(action.Action, "hme-server-login") {
+				if !s.syncActionMu.TryLock() {
+					json.NewEncoder(w).Encode(control.Result{Message: "正在处理服务器登录，请稍后重试"})
+					return
+				}
+				defer s.syncActionMu.Unlock()
+			}
 			if (action.Action == "hme-server-sync" || action.Action == "hme-server-login" || action.Action == "hme-server-login-device") && input.ProfileID != "" {
 				profile, err := s.resolveSyncProfile(input.ProfileID, action.Note)
 				if err != nil {

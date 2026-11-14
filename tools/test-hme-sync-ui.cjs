@@ -10,6 +10,15 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.hostname !== 'fixture.test') return route.abort();
+      if (url.pathname === '/api/sync-recovery') {
+        const input = request.postDataJSON();
+        assert.equal(input.profile_id,'1');
+        assert.equal(url.searchParams.get('account'),'fixture');
+        const profile = profiles.find(item => item.id === input.profile_id);
+        assert.equal(input.url,profile.url);
+        profile.recovery_enabled = input.enabled;
+        return route.fulfill({json:{ok:true,enabled:input.enabled}});
+      }
       if (url.pathname === '/api/view') return route.fulfill({json:view});
       if (url.pathname === '/api/sync-profiles') {
         if (request.method() === 'POST') {
@@ -62,6 +71,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#serverSyncURL').inputValue(),'https://two.example.test');
     await page.locator('#serverSyncProfile').selectOption('1');
     assert.equal(await page.locator('#serverSyncURL').inputValue(),'https://one.example.test');
+    await page.locator('#serverRecoveryEnabled').uncheck();
+    await page.waitForFunction(()=>document.getElementById('serverRecoveryStatus').textContent==='已关闭');
+    assert.equal(profiles[0].recovery_enabled,false);
+    await page.locator('#serverRecoveryEnabled').check();
+    await page.waitForFunction(()=>document.getElementById('serverRecoveryStatus').textContent.includes('已启用'));
+    assert.equal(profiles[0].recovery_enabled,true);
     await page.locator('#serverSyncForm button[type=submit]').click();
     await page.waitForFunction(()=>!document.getElementById('serverSyncOTPRow').hidden);
     assert.equal(actions.length,2);

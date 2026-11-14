@@ -14,9 +14,11 @@ import (
 )
 
 type syncProfile struct {
-	ID    string `json:"id"`
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	RecoverySources map[string]string          `json:"recovery_sources,omitempty"`
+	RecoveryHandled map[string]recoveryAttempt `json:"recovery_handled,omitempty"`
+	ID              string                     `json:"id"`
+	URL             string                     `json:"url"`
+	Token           string                     `json:"token"`
 }
 type syncProfiles struct {
 	Version  int           `json:"version"`
@@ -30,9 +32,11 @@ type syncProfileInput struct {
 	Token     string `json:"token"`
 }
 type syncProfilePublic struct {
-	ID       string `json:"id"`
-	URL      string `json:"url"`
-	KeySaved bool   `json:"key_saved"`
+	RecoveryEnabled bool            `json:"recovery_enabled"`
+	RecoveryStatus  *recoveryStatus `json:"recovery_status,omitempty"`
+	ID              string          `json:"id"`
+	URL             string          `json:"url"`
+	KeySaved        bool            `json:"key_saved"`
 }
 
 func (s *Server) readSyncProfiles() (syncProfiles, error) {
@@ -132,6 +136,10 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 			value.Profiles = append(value.Profiles, syncProfile{ID: hex.EncodeToString(id)})
 			index = len(value.Profiles) - 1
 		}
+		if value.Profiles[index].URL != address || value.Profiles[index].Token != token {
+			value.Profiles[index].RecoverySources = nil
+			value.Profiles[index].RecoveryHandled = nil
+		}
 		value.Profiles[index].URL = address
 		value.Profiles[index].Token = token
 		value.Selected = value.Profiles[index].ID
@@ -177,7 +185,20 @@ func (s *Server) serveSyncProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	public := make([]syncProfilePublic, 0, len(value.Profiles))
 	for _, p := range value.Profiles {
-		public = append(public, syncProfilePublic{p.ID, p.URL, p.Token != ""})
+		item := syncProfilePublic{ID: p.ID, URL: p.URL, KeySaved: p.Token != ""}
+		if a := s.lookup(r.URL.Query().Get("account")); a != nil {
+			item.RecoveryEnabled = p.RecoverySources[a.ID] == hmesync.SourceID(a.AppleID)
+		}
+		if status, ok := s.recoveryStatus.Load(p.ID); ok {
+			value := status.(recoveryStatus)
+			item.RecoveryStatus = &value
+		}
+		if a := s.lookup(r.URL.Query().Get("account")); a != nil && item.RecoveryEnabled {
+			if attempt := p.RecoveryHandled[hmesync.SourceID(a.AppleID)]; attempt.Outcome == "verification_required" {
+				item.RecoveryStatus = &recoveryStatus{State: "verification_required", Message: "Apple 要求人工验证，请在此窗口完成验证"}
+			}
+		}
+		public = append(public, item)
 	}
 	json.NewEncoder(w).Encode(struct {
 		Selected string              `json:"selected"`
