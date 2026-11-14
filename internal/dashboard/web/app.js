@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id), token = document.querySelector('met
 let loginMode = 'reconnect', loginAccount = '', current = null, busy = false, privateCode = '', privateCodeKind = '', hideAt = 0, codeTotalMs = 60000, lastState = '', lastQuery = '', lastRefresh = '', lastRequest = '', noticeTimer, selectedAccount = localStorage.getItem('selected-account') || '', familyInfo = null, familyAccount = '', familyCheckedAt = '', familyStale = false, storageAccount = '', storageCheckedAt = '', planAccount = '', planCheckedAt = '', poolOrganizerAccount = localStorage.getItem('family-organizer-account') || '', poolOrganizerName = localStorage.getItem('family-organizer-name') || '', purchaseAction = '', purchaseLabel = '', hmeInfo = null, hmeAccount = '', hmeCandidate = '', hmeFilter = 'active', hmeVisible = 100, hmeEditing = '', activationInfo = null, activationAccount = '', autoRefreshScheduled = false;
 let storeAuthReady = false, storeAuthAccount = '', storeAuthPID = 0, storeAuthRefresh = '';
 let giftOwner = '', giftPID = 0;
+let purchaseFlowRunning = false;
 let verificationContext = '';
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -724,7 +725,7 @@ function render(view) {
     storeAuthReady = !!view.store_session_ready && !!online && !!view.control_ready;
     storeAuthRefresh = status.last_refresh_at || '';
     if (storeAuthReady) $('storeAuthSummary').textContent = '已验证';
-    else if (wasReady) $('storeAuthSummary').textContent = '购买会话不可用，请重新验证购买会话。';
+    else if (wasReady) $('storeAuthSummary').textContent = '购买会话待验证，点击开通时自动检查。';
   }
 
   if (giftOwner !== selectedAccount || giftPID !== (status.pid || 0) || !online) {
@@ -801,22 +802,19 @@ function render(view) {
   $('deviceCount').textContent = status.device_count || '—';
   $('navCount').textContent = status.device_count || '—';
 
-  const storageRefreshing = autoRefreshAttemptStatus(autoRefreshKey('storage', view.storage_checked_at)) === 'refreshing', planRefreshing = autoRefreshAttemptStatus(autoRefreshKey('plan', view.storage_plan_checked_at)) === 'refreshing';
+  const storageRefreshing = autoRefreshAttemptStatus(autoRefreshKey('storage', view.storage_checked_at)) === 'refreshing';
   $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online;
   $('devicesButton').disabled = busy || !online || !view.control_ready;
   $('storageButton').disabled = busy || storageRefreshing || (!activated && (!online || !view.control_ready));
-  $('planButton').disabled = busy || planRefreshing || (!activated && (!online || !view.control_ready));
-  $('purchaseButton').disabled = busy || !online || !view.control_ready || !purchaseAction || hasPaidStorage(view);
-  $('paymentCheckButton').disabled = busy || !online || !view.control_ready;
-  $('storeAuthButton').disabled = busy || !online || !view.control_ready;
+  $('purchaseButton').disabled = busy || purchaseFlowRunning || !online || !view.control_ready || hasPaidStorage(view);
 
   if (hasPaidStorage(view)) {
     $('purchaseButton').textContent = 'iCloud+ 已开通';
-  } else if (purchaseAction) {
-    $('purchaseButton').textContent = '开通 50GB · ' + purchaseLabel;
+  } else {
+    $('purchaseButton').textContent = purchaseFlowRunning ? '正在检查并开通…' : '开通 iCloud+ · 50GB';
   }
 
-  const cloudHint = hasPaidStorage(view) ? 'iCloud+ 已开通 · ' + gib(view.storage.paid_bytes) : !online ? '账户未在线' : !view.control_ready ? '等待后台连接' : busy ? '正在处理…' : !purchaseAction ? '待读取方案' : purchaseAction === 'storage-skill-purchase-us' && !storeAuthReady ? '可开通 · ' + purchaseLabel : '报价已核验 · ' + purchaseLabel;
+  const cloudHint = hasPaidStorage(view) ? 'iCloud+ 已开通 · ' + gib(view.storage.paid_bytes) : !online ? '账户未在线' : !view.control_ready ? '等待后台连接' : busy ? '正在处理…' : !purchaseAction ? '点击开通以检查 50GB 方案' : purchaseAction === 'storage-skill-purchase-us' && !storeAuthReady ? '可开通 · ' + purchaseLabel : '报价已核验 · ' + purchaseLabel;
   $('icloudAccessHint').textContent = cloudHint;
   $('purchaseAvailability').textContent = cloudHint;
   $('icloudLoginLink').hidden = online;
@@ -934,25 +932,20 @@ function renderPlans(info, { checkedAt = '', stale = false } = {}) {
   note.classList.toggle('stale', !!stale);
   const target = info.plans.find(plan => plan.bytes === 50 * 1024 * 1024 * 1024 && plan.available);
   $('planSummary').textContent = stale ? '50GB 方案待重新读取' : target ? '有 50GB 可购方案' : '无 50GB 可购方案';
-  if (!stale && target?.currency === 'CNY' && target.price_minor === 600) {
+  if (!stale && target?.currency === 'CNY' && target.price_minor === 600 && target.period === 'month') {
     purchaseAction = 'storage-purchase';
     purchaseLabel = 'CNY 6.00/月';
-  } else if (target?.currency === 'USD' && target.price_minor === 99) {
+  } else if (!stale && target?.currency === 'USD' && target.price_minor === 99 && target.period === 'month') {
     purchaseAction = 'storage-skill-purchase-us';
     purchaseLabel = 'USD 0.99/月';
-  }
-  if (stale) {
-    if (purchaseAction === 'storage-skill-purchase-us') $('purchaseButton').textContent = '检查并开通 50GB';
-  } else if (purchaseAction) {
-    $('purchaseButton').textContent = '开通 50GB · ' + purchaseLabel;
   }
 }
 
 function purchaseOutcomeMessage(result) {
   if (!result.ok) {
-    if (result.stage === 'purchase-store-token-expired') return '购买会话已失效，请点击“重新检查付款”完成认证后再确认开通。';
-    if (result.stage === 'purchase-store-session') return '购买会话已失效或随登录续期重置，请重新验证购买会话；未提交购买。';
-    if (['payment-confirmation', 'billing-confirmation'].includes(result.apple_hint)) return 'Apple 返回付款或账单相关提示，请检查该账号的可用付款方式或 Apple 账户余额。可在官方客户端兑换同地区礼品卡，到账后点击“重新检查付款”；此提示不能单独确定错误原因。';
+    if (result.stage === 'purchase-store-token-expired') return '购买会话已失效；再次点击“开通 iCloud+ · 50GB”会重新检查并请求确认。';
+    if (result.stage === 'purchase-store-session') return '购买会话已失效；再次点击开通会自动检查，当前未提交购买。';
+    if (['payment-confirmation', 'billing-confirmation'].includes(result.apple_hint)) return 'Apple 返回付款或账单相关提示，请检查该账号的可用付款方式或 Apple 账户余额。可在官方客户端兑换同地区礼品卡，到账后再次点击开通；此提示不能单独确定错误原因。';
     if (result.stage === 'purchase-skill-buy') return 'Apple 未接受此次购买。HTTP 200 仅表示收到响应，不代表已开通；具体原因请查看下方 Apple 错误码。若尚未添加付款方式，请先完成付款准备。';
     return result.message || '购买结果尚未确认，请先核对订阅和容量，不要重复提交。';
   }
@@ -1032,7 +1025,7 @@ async function action(name, extra = {}, options = {}) {
       if (['purchase-store-session', 'purchase-store-token-expired'].includes(result.stage)) {
         storeAuthReady = false;
         if (current && actionAccount === selectedAccount) current.store_session_ready = false;
-        $('storeAuthSummary').textContent = '购买会话不可用，请重新验证购买会话。';
+        $('storeAuthSummary').textContent = '购买会话待验证，点击开通时自动检查。';
       }
       if (name === 'storage-skill-auth-local') {
         storeAuthReady = false;
@@ -1152,7 +1145,6 @@ $('activationAcceptButton').addEventListener('click', () => {
   if (!confirm('确认接受 ' + activationInfo.region + ' 区 iCloud ' + activationInfo.icloud_version + ' 与媒体服务 ' + (activationInfo.media_version || '无更新') + ' 条款，并继续生成本账号 NAC 完成激活？')) return;
   action('activation-accept', { code: tuple });
 });
-$('planButton').addEventListener('click', () => action('storage-plan'));
 $('familyRefreshButton').addEventListener('click', () => action('family-info'));
 $('familyOrganizer').addEventListener('change', () => { if (current) render(current); });
 $('familyRemoveMember').addEventListener('change', () => { if (current) render(current); });
@@ -1234,35 +1226,42 @@ $('giftRedeemForm').addEventListener('submit', async event => {
   $('giftResult').textContent = '正在检查兑换会话并提交兑换…';
   await action('gift-redeem', { code });
 });
-$('paymentCheckButton').addEventListener('click', async () => {
-  if (busy) return;
-  const account = selectedAccount;
-  const quota = await action('storage-info');
-  if (!quota?.ok || selectedAccount !== account) return;
-  if (hasPaidStorage(current)) { notice('付费容量已核验，iCloud+ 已开通。'); return; }
-  if (!current?.purchase_preparation_available) { notice('请重新连接账号加载新版购买预检查。', true); return; }
-  const prepared = await action('storage-purchase-prepare-us');
-  if (prepared?.ok && selectedAccount === account) notice('预检查通过。余额请在 Apple 官方客户端核对；点击开通并确认后才会提交订阅。');
-});
 $('purchaseButton').addEventListener('click', async () => {
-  if (busy || !purchaseAction || !purchaseLabel || hasPaidStorage(current)) return;
-  const account = selectedAccount, requestedAction = purchaseAction;
-  if (requestedAction === 'storage-skill-purchase-us') {
-    if (!current?.purchase_preparation_available) { notice('购买链路已更新，请在此重新连接账号加载新版后台。', true); openLogin('reconnect'); return; }
+  if (busy || purchaseFlowRunning || !current?.status?.running || !current?.status?.authenticated || !current?.control_ready || hasPaidStorage(current)) return;
+  const account = selectedAccount, pid = current.status.pid;
+  const sameSession = () => selectedAccount === account && current?.status?.pid === pid && current?.status?.authenticated && current?.control_ready;
+  purchaseFlowRunning = true;
+  try {
     $('purchaseResult').hidden = false;
-    $('purchaseResult').textContent = '正在检查当前容量、实时报价、购买会话和现有订阅；尚未提交购买…';
-    const prepared = await action('storage-purchase-prepare-us');
-    if (!prepared?.ok || selectedAccount !== account || purchaseAction !== requestedAction) return;
+    $('purchaseResult').textContent = '正在检查容量、50GB 方案与购买会话…';
+    const quota = await action('storage-info');
+    if (!quota?.ok || !sameSession()) return;
+    if (hasPaidStorage(current)) {
+      $('purchaseResult').textContent = 'iCloud+ 已开通';
+      $('purchaseResult').hidden = false;
+      return;
+    }
+    const plans = await action('storage-plan');
+    if (!plans?.ok || !sameSession()) return;
+    const requestedAction = purchaseAction, price = purchaseLabel;
+    if (!requestedAction || !price) {
+      $('purchaseResult').textContent = '当前没有可开通的已核验 50GB 月付方案。';
+      $('purchaseResult').hidden = false;
+      notice('当前没有可开通的已核验 50GB 月付方案。', true);
+      return;
+    }
+    if (requestedAction === 'storage-skill-purchase-us') {
+      if (!current.purchase_preparation_available) { notice('请重新连接账号加载新版购买预检查。', true); openLogin('reconnect'); return; }
+      const prepared = await action('storage-purchase-prepare-us');
+      if (!prepared?.ok || !sameSession() || purchaseAction !== requestedAction || purchaseLabel !== price || hasPaidStorage(current)) return;
+    }
+    if (!sameSession()) return;
+    if (!confirm('确认给 ' + (current.login_account || current.account || '当前账号') + ' 开通 iCloud+ 50GB（' + price + '）？这是会产生真实扣款并自动续费的订阅。')) return;
+    await action(requestedAction);
+  } finally {
+    purchaseFlowRunning = false;
+    if (current) render(current);
   }
-  if (!confirm('确认购买 iCloud+ 50GB（' + purchaseLabel + '）？这是会产生真实扣款并自动续费的订阅。')) return;
-  action(requestedAction);
-});
-$('storeAuthButton').addEventListener('click', () => {
-  if (busy) return;
-  storeAuthReady = false;
-  if (current) current.store_session_ready = false;
-  $('storeAuthSummary').textContent = '正在验证购买会话…';
-  action('storage-skill-auth-local');
 });
 $('addAccountButton').addEventListener('click', () => openLogin('add'));
 $('addAccountButtonSecondary').addEventListener('click', () => openLogin('add'));

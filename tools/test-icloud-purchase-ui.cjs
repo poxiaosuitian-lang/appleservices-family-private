@@ -6,11 +6,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const web = path.join(__dirname, '../internal/dashboard/web');
 const GiB = 1024 ** 3;
 const quota = paid => ({total_bytes:(paid || 5)*GiB,paid_bytes:paid*GiB,used_bytes:0,available_bytes:(paid || 5)*GiB});
-async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purchaseExpired=false, giftFailure=false, giftDisconnect=false}={}, check) {
+async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purchaseExpired=false, giftFailure=false, giftDisconnect=false, initialPlans=true, available50=true, price=99, planOK=true}={}, check) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const calls=[], errors=[], actionAccounts=[];
   const view={selected:'fixture',account:'Fixture',accounts:[],status:{running:true,authenticated:true,state:'online',pid:123},control_ready:true,icloud_activated:true,store_session_ready:true,purchase_preparation_available:true,gift_card_available:true,storage:quota(paid),storage_stale:false,storage_checked_at:'2026-01-01T00:00:00Z',storage_plan_stale:false,storage_plan_checked_at:'2026-01-01T00:00:00Z',storage_plan:{plans:[{bytes:50*GiB,currency:'USD',price_minor:99,period:'month',available:true}]}};
+  if(!initialPlans)view.storage_plan={plans:[]};
   const views=new Map([['fixture',view]]);
   page.on('pageerror', e=>errors.push(e.message));
   await page.route('**/*', async route=>{
@@ -45,7 +46,11 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
         if(giftDisconnect)return route.abort();
         result=giftFailure?{ok:false,message:'兑换检查未通过，尚未提交兑换',gift_card:{state:'not-submitted'}}:{ok:true,message:'Apple 已确认入账',gift_card:{state:'completed',credited:'$5.00',balance:'$5.00'}};
       }
-      else if(action==='storage-info'){view.storage=quota(discovered);view.storage_checked_at=new Date().toISOString();result={ok:true,storage:view.storage};}
+      else if(action==='storage-info'){view.storage=quota(account==='fixture'?discovered:0);view.storage_checked_at=new Date().toISOString();result={ok:true,storage:view.storage};}
+      else if(action==='storage-plan'){
+        view.storage_plan={plans:available50?[{bytes:50*GiB,currency:'USD',price_minor:price,period:'month',available:true}]:[]};
+        result={ok:planOK,storage_plan:view.storage_plan,message:planOK?'方案已读取':'方案读取失败'};
+      }
       else if(action==='storage-purchase-prepare-us'){
         view.store_session_ready=prepareOK;
         result={ok:prepareOK,stage:prepareOK?'purchase-prepared':'purchase-store-authentication',storage:view.storage,storage_plan:view.storage_plan,store_authentication:{ready:prepareOK}};
@@ -68,7 +73,7 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
   });
   try{
     await page.goto('http://dashboard.test/#icloud');
-    await page.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
+    await page.waitForFunction(()=>document.getElementById('giftCode').disabled===false);
     await check(page,calls,actionAccounts);
     assert.deepEqual(errors,[]);
   }finally{await context.close();}
@@ -76,49 +81,58 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
 (async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
   try{
+    const checks=['storage-info','storage-plan','storage-purchase-prepare-us'];
     await scenario(browser,{},async(p,c)=>{
-      await p.locator('#paymentCheckButton').click();
-      await p.waitForFunction(()=>document.getElementById('notice').textContent.includes('预检查通过'));
-      assert.deepEqual(c,['storage-info','storage-purchase-prepare-us']);
-      p.on('dialog',d=>d.dismiss());await p.locator('#purchaseButton').click();
-      await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
-      assert(!c.includes('storage-skill-purchase-us'));
+      for(const id of ['planButton','storeAuthButton','paymentCheckButton']) assert.equal(await p.locator('#'+id).count(),0);
+      assert.equal(await p.locator('#purchaseButton').innerText(),'开通 iCloud+ · 50GB');
+      p.once('dialog',d=>{assert.match(d.message(),/USD 0.99\/月/);return d.dismiss();});
+      await p.locator('#purchaseButton').click();
+      await p.waitForFunction(()=>!purchaseFlowRunning&&document.getElementById('purchaseResult').textContent!=='');
+      assert.deepEqual(c,checks);
     });
     await scenario(browser,{paid:50},async(p,c)=>{
       assert(await p.locator('#purchaseButton').isDisabled());
-      assert.equal(await p.locator('#hmeCard').evaluate(el=>el.hidden),false,'personal iCloud+ must expose hidden email settings without family membership');
-      assert.match(await p.locator('#purchaseAvailability').innerText(),/已开通.*50GB/);
-      await p.reload();await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
+      assert.equal(await p.locator('#purchaseButton').innerText(),'iCloud+ 已开通');
+      assert.equal(await p.locator('#hmeCard').evaluate(el=>el.hidden),false);
+      await p.reload();await p.waitForFunction(()=>!document.getElementById('giftCode').disabled);
+      assert.equal(await p.locator('#purchaseButton').innerText(),'iCloud+ 已开通');
       assert(await p.locator('#purchaseButton').isDisabled());assert.deepEqual(c,[]);
     });
     await scenario(browser,{discovered:50},async(p,c)=>{
-      await p.locator('#paymentCheckButton').click();
-      await p.waitForFunction(()=>document.getElementById('purchaseButton').disabled&&!document.getElementById('paymentCheckButton').disabled);
+      await p.locator('#purchaseButton').click();
+      await p.waitForFunction(()=>document.getElementById('purchaseButton').textContent==='iCloud+ 已开通');
+      assert(await p.locator('#purchaseButton').isDisabled());
+      assert.equal(await p.locator('#purchaseResult').innerText(),'iCloud+ 已开通');
       assert.deepEqual(c,['storage-info']);
     });
     await scenario(browser,{prepareOK:false},async(p,c)=>{
-      await p.locator('#paymentCheckButton').click();
-      await p.waitForFunction(()=>document.getElementById('notice').classList.contains('error'));
-      assert.deepEqual(c,['storage-info','storage-purchase-prepare-us']);
+      await p.locator('#purchaseButton').click();
+      await p.waitForFunction(()=>document.getElementById('notice').classList.contains('error')&&!purchaseFlowRunning);
+      assert.deepEqual(c,checks);
     });
-    await scenario(browser,{},async(p,c)=>{
-      p.on('dialog',d=>d.accept());await p.locator('#purchaseButton').click();
+    await scenario(browser,{initialPlans:false},async(p,c)=>{
+      p.once('dialog',d=>d.accept());await p.locator('#purchaseButton').click();
       await p.waitForFunction(()=>document.getElementById('purchaseButton').textContent==='iCloud+ 已开通');
-      assert.deepEqual(c,['storage-purchase-prepare-us','storage-skill-purchase-us']);
+      assert.deepEqual(c,[...checks,'storage-skill-purchase-us']);
       assert(await p.locator('#purchaseButton').isDisabled());
     });
+    for(const options of [{available50:false},{price:199},{planOK:false}]){
+      await scenario(browser,options,async(p,c)=>{
+        await p.locator('#purchaseButton').click();
+        await p.waitForFunction(()=>document.getElementById('notice').classList.contains('error')&&!purchaseFlowRunning);
+        assert.deepEqual(c,['storage-info','storage-plan']);
+        assert(await p.locator('#purchaseButton').isEnabled());
+      });
+    }
     await scenario(browser,{purchaseExpired:true},async(p,c)=>{
-      p.on('dialog',d=>d.accept());
-      await p.locator('#purchaseButton').click();
-      await p.waitForFunction(()=>document.getElementById('purchaseResult').textContent.includes('2034')&&!document.getElementById('paymentCheckButton').disabled);
-      assert.deepEqual(c,['storage-purchase-prepare-us','storage-skill-purchase-us']);
-      assert.match(await p.locator('#purchaseResult').innerText(),/购买会话已失效.*重新检查付款/);
-      assert.match(await p.locator('#storeAuthSummary').innerText(),/不可用.*重新验证/);
+      p.once('dialog',d=>d.accept());await p.locator('#purchaseButton').click();
+      await p.waitForFunction(()=>document.getElementById('purchaseResult').textContent.includes('2034')&&!purchaseFlowRunning);
+      assert.deepEqual(c,[...checks,'storage-skill-purchase-us']);
+      assert.match(await p.locator('#purchaseResult').innerText(),/购买会话已失效.*再次点击/);
       assert.equal(await p.evaluate(()=>storeAuthReady),false);
-      await p.locator('#paymentCheckButton').click();
-      await p.waitForFunction(()=>document.getElementById('notice').textContent.includes('预检查通过'));
-      assert.equal(await p.evaluate(()=>storeAuthReady),true);
-      assert.deepEqual(c,['storage-purchase-prepare-us','storage-skill-purchase-us','storage-info','storage-purchase-prepare-us']);
+      p.once('dialog',d=>d.dismiss());await p.locator('#purchaseButton').click();
+      await p.waitForFunction(()=>storeAuthReady&&!purchaseFlowRunning);
+      assert.deepEqual(c,[...checks,'storage-skill-purchase-us',...checks]);
       assert.notEqual(await p.locator('#purchaseButton').innerText(),'iCloud+ 已开通');
     });
     await scenario(browser,{},async(p,c)=>{
@@ -132,7 +146,7 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
       await p.waitForFunction(()=>document.getElementById('giftResult').textContent.includes('余额 $5.00'));
       assert.deepEqual(c,['gift-redeem']);
       assert(await p.locator('#giftRedeemButton').isDisabled());
-      await p.reload();await p.waitForFunction(()=>!document.getElementById('paymentCheckButton').disabled);
+      await p.reload();await p.waitForFunction(()=>document.getElementById('giftCode').disabled===false);
       assert.equal(await p.locator('#giftCode').inputValue(),'');assert(await p.locator('#giftCode').isEnabled());
     });
     for(const giftDisconnect of [false,true]){
@@ -180,6 +194,8 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
       await p.waitForFunction(()=>document.getElementById('purchaseButton').textContent==='iCloud+ 已开通');
       assert.deepEqual(targets,[
         {action:'gift-redeem',account:'fixture-new'},
+        {action:'storage-info',account:'fixture-new'},
+        {action:'storage-plan',account:'fixture-new'},
         {action:'storage-purchase-prepare-us',account:'fixture-new'},
         {action:'storage-skill-purchase-us',account:'fixture-new'},
       ]);
