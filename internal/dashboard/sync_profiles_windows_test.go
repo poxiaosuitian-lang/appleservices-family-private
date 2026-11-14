@@ -82,6 +82,7 @@ func TestSyncActionResolvesSelectedProfileOnlyInBackend(t *testing.T) {
 	}
 	var got control.Action
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = control.Action{}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Error("invalid worker command")
 		}

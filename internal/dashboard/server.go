@@ -1209,7 +1209,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			action := input.Action
-			if (action.Action == "hme-server-sync" || action.Action == "hme-server-login") && input.ProfileID != "" {
+			if (action.Action == "hme-server-sync" || action.Action == "hme-server-login" || action.Action == "hme-server-login-device") && input.ProfileID != "" {
 				profile, err := s.resolveSyncProfile(input.ProfileID, action.Note)
 				if err != nil {
 					json.NewEncoder(w).Encode(control.Result{Message: err.Error()})
