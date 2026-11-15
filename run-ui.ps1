@@ -21,6 +21,15 @@ function Assert-DashboardResponse($Response) {
 $existing = Get-DashboardResponse
 if ($existing) {
     Assert-DashboardResponse $existing
+}
+
+# Repair the optional helper even when the dashboard is already running.
+# Building it performs no Apple account or Family Sharing operations.
+if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bin\familyinspect.exe') -PathType Leaf)) {
+    & (Join-Path $PSScriptRoot 'tools\familyinspect\build.ps1') -EnvironmentFile $EnvironmentFile
+}
+
+if ($existing) {
     Write-Host "Dashboard already running: $url"
     if (-not $NoOpen) { Start-Process $url }
     return
@@ -32,7 +41,7 @@ if (-not (Test-Path -LiteralPath $EnvironmentFile -PathType Leaf)) {
 . $EnvironmentFile
 $env:APPLESERVICES_CACHE_DIR = 'D:\appleservices-deps\runtime-cache'
 
-foreach ($relative in @('bin\dashboard.exe', 'bin\trusted-device-gui.exe', 'bin\storeauth.exe',
+foreach ($relative in @('bin\dashboard.exe', 'bin\trusted-device-gui.exe', 'bin\storeauth.exe', 'bin\familyinspect.exe',
         '.cache\openbubbles-store\rust_lib_bluebubbles.dll', 'tools\mac-push-check.py')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $relative) -PathType Leaf)) {
         throw "Required file missing: $relative"
