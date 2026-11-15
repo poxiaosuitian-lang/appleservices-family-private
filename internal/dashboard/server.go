@@ -23,6 +23,7 @@ import (
 
 	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/apppassword"
+	"github.com/Laky-64/appleservices/internal/backgroundexec"
 	"github.com/Laky-64/appleservices/internal/control"
 	"github.com/Laky-64/appleservices/internal/mailsetup"
 )
@@ -503,6 +504,7 @@ func runFamilyStatus(ctx context.Context, helper string, account *Account, joinS
 		args = append(args, "-join-shared-storage")
 	}
 	command := exec.CommandContext(ctx, helper, args...)
+	backgroundexec.Configure(command)
 	command.Env = os.Environ()
 	var output bytes.Buffer
 	command.Stdout = &output
@@ -718,6 +720,7 @@ func (s *Server) removeFamilyMember(ctx context.Context, organizer *Account, tar
 	actionCtx, cancel := context.WithTimeout(ctx, 105*time.Second)
 	defer cancel()
 	command := exec.CommandContext(actionCtx, helper, "-dir", organizer.Dir, "-remove-pool-member-dir", target.Dir, "-safe-json")
+	backgroundexec.Configure(command)
 	command.Env = os.Environ()
 	var output bytes.Buffer
 	command.Stdout = &output

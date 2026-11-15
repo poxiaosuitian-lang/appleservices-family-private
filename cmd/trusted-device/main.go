@@ -22,6 +22,7 @@ import (
 	"github.com/Laky-64/appleservices/aps"
 	"github.com/Laky-64/appleservices/gsa"
 	"github.com/Laky-64/appleservices/icloud"
+	"github.com/Laky-64/appleservices/internal/backgroundexec"
 	"github.com/Laky-64/appleservices/internal/circle"
 	"github.com/Laky-64/appleservices/internal/control"
 	"github.com/Laky-64/appleservices/internal/hmesync"
@@ -1754,6 +1755,7 @@ const familyStatusPrefix = "FAMILY_STATUS_JSON="
 
 func runFamilyHelper(ctx context.Context, helper string, args, extraEnv []string) (string, error) {
 	command := exec.CommandContext(ctx, helper, args...)
+	backgroundexec.Configure(command)
 	command.Env = append(os.Environ(), extraEnv...)
 	var output bytes.Buffer
 	command.Stdout = &output
