@@ -13,6 +13,15 @@ import (
 
 type headerProvider map[string]string
 
+func TestDroppedRequestTemporaryClassification(t *testing.T) {
+	for _, status := range []int{0, 200, 403, 404, 429, 500, 503} {
+		err := &droppedRequestError{status: status}
+		if err.Temporary() != (status == 0 || status/100 == 5) {
+			t.Fatalf("incorrect temporary classification for %d", status)
+		}
+	}
+}
+
 func (p headerProvider) Headers() (map[string]string, error) { return p, nil }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

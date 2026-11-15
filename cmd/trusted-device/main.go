@@ -566,6 +566,8 @@ func run() (runErr error) {
 	}
 	refresh := time.NewTicker(*refreshEvery)
 	defer refresh.Stop()
+	var renewalRecovery renewalRetry
+	defer renewalRecovery.stop()
 	beginRenewal := func() (maintainedLogin, error) {
 		if *resumeSession || passwordRemembered {
 			saved, err := resumeSavedLogin(appleID, store, options...)
@@ -594,6 +596,11 @@ func run() (runErr error) {
 		}, accountID, registration, !*resumeSession && !passwordRemembered, password, &reconnect)
 		if err != nil {
 			status.State = "refresh_failed"
+			if transientLoginFailure(err) {
+				renewalRecovery.schedule()
+			} else {
+				renewalRecovery.stop()
+			}
 			if errors.Is(err, errVerificationRequired) || reconnect.blocked {
 				status.State, status.VerificationRequired = "verification_required", true
 			}
@@ -606,6 +613,7 @@ func run() (runErr error) {
 			}
 		}
 		active = renewed
+		renewalRecovery.stop()
 		reconnect.blocked = false
 		if panel != nil {
 			ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
@@ -1597,6 +1605,11 @@ func run() (runErr error) {
 			if err := status.save(*dir); err != nil {
 				return err
 			}
+			if result.err == nil && renewalRecovery.channel() != nil {
+				// A restored push connection is evidence that the network is back.
+				// Retry the interrupted read/login without waiting for the normal tick.
+				renew()
+			}
 		case command := <-panelCommands:
 			if command.Context.Err() != nil {
 				continue
@@ -1608,6 +1621,11 @@ func run() (runErr error) {
 			result := performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers)
 			queueHMEForwardAfterPurchase(result, autoAppPassword)
 			command.Reply <- result
+		case <-renewalRecovery.channel():
+			result := renew()
+			if result.OK {
+				fmt.Fprintln(os.Stderr, "Session restored after a temporary connection failure.")
+			}
 		case <-refresh.C:
 			result := renew()
 			if status.VerificationRequired {

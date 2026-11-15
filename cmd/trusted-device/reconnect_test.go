@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"github.com/Laky-64/appleservices"
+	"io"
+	"net"
 	"testing"
+	"time"
 
+	"github.com/Laky-64/appleservices"
 	"github.com/Laky-64/appleservices/gsa"
 	"github.com/Laky-64/appleservices/icloud"
 )
@@ -32,6 +36,63 @@ func TestReconnectOnlyAfterExplicitAppleAuthenticationRejection(t *testing.T) {
 		if test.allow && gate.allow(test.err, "synthetic") {
 			t.Fatal("failed authentication would be repeated")
 		}
+	}
+}
+
+func TestNetworkFailureDuringPasswordFallbackDoesNotRequireOTP(t *testing.T) {
+	gate := reconnectGate{}
+	calls := 0
+	begin := func() (maintainedLogin, error) { return nil, &icloud.StorageError{HTTPStatus: 401} }
+	fresh := func() (maintainedLogin, error) {
+		calls++
+		if calls == 1 {
+			return nil, fmt.Errorf("transport: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("disconnected")})
+		}
+		return &fakeMaintainedLogin{account: "owner"}, nil
+	}
+	_, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if !transientLoginFailure(err) || gate.blocked {
+		t.Fatal("network failure became an authentication block")
+	}
+	login, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if err != nil || login == nil || gate.blocked || calls != 2 {
+		t.Fatal("network restoration did not recover session")
+	}
+}
+
+func TestTransientLoginFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false}, {context.Canceled, false}, {context.DeadlineExceeded, true}, {io.EOF, true},
+		{&icloud.StorageError{Stage: "transport"}, true}, {&icloud.StorageError{Stage: "settings-transport"}, true},
+		{&icloud.StorageError{Stage: "authentication"}, false}, {&icloud.StorageError{HTTPStatus: 403}, false},
+		{&gsa.AuthenticationError{HTTPStatus: 503}, true}, {&gsa.AuthenticationError{Code: -20101}, false},
+		{&gsa.DeviceRequestError{HTTPStatus: 429}, false}, {errVerificationRequired, false},
+		{errors.New("different account"), false},
+	} {
+		if transientLoginFailure(tc.err) != tc.want {
+			t.Fatalf("classification mismatch for %T", tc.err)
+		}
+	}
+}
+
+func TestRenewalRetryIsInactiveUntilFailureAndStopsAfterRecovery(t *testing.T) {
+	var retry renewalRetry
+	defer retry.stop()
+	if retry.channel() != nil {
+		t.Fatal("healthy session has a retry timer")
+	}
+	for _, want := range []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute} {
+		retry.schedule()
+		if retry.delay != want || retry.channel() == nil {
+			t.Fatal("incorrect retry backoff")
+		}
+	}
+	retry.stop()
+	if retry.channel() != nil || retry.delay != 0 {
+		t.Fatal("recovery retained timer")
 	}
 }
 

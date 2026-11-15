@@ -184,6 +184,10 @@ func (e *droppedRequestError) Error() string {
 	return "gsa: request did not reach the application (" + e.reason + ")"
 }
 
+// Temporary preserves transport classification without exposing response data.
+// Rate limits and access refusals require separate handling, not reconnect loops.
+func (e *droppedRequestError) Temporary() bool { return e.status == 0 || e.status/100 == 5 }
+
 // gsaRoundTrip performs one GrandSlam call. It reports a droppedRequestError
 // when the edge answered without forwarding the request.
 func (c *Client) gsaRoundTrip(request map[string]any, body []byte, headers map[string]string) (map[string]any, error) {
