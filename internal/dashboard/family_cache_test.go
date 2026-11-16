@@ -73,6 +73,27 @@ func TestFamilyCacheRoundTripAndReplacement(t *testing.T) {
 	}
 }
 
+func TestLegacyNegativeFamilyCacheRequiresRevalidation(t *testing.T) {
+	account := &Account{ID: "organizer", Dir: t.TempDir()}
+	for _, member := range []bool{false, true} {
+		record := familyCacheRecord{Version: 1, AccountID: account.ID, CheckedAt: time.Now().UTC(), Family: control.FamilyInfo{Member: member, Organizer: member}}
+		data, _ := json.Marshal(record)
+		if err := os.WriteFile(familyCachePath(account), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, _, _ := readFamilyCache(account)
+		if (got != nil) != member {
+			t.Fatalf("legacy membership %v accepted incorrectly", member)
+		}
+	}
+	if _, err := writeFamilyCache(account, &control.FamilyInfo{Member: false, Eligible: true, EligibilityKnown: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := readFamilyCache(account); got == nil || got.Member {
+		t.Fatal("validated negative status not preserved")
+	}
+}
+
 func TestFamilyCacheRejectsWrongAccountAndMarksOldStateStale(t *testing.T) {
 	account := &Account{ID: "01-primary", Dir: t.TempDir()}
 	record := familyCacheRecord{Version: familyCacheVersion, AccountID: "other", CheckedAt: time.Now().UTC(), Family: control.FamilyInfo{Member: true, Members: 3, Organizers: 1, Self: 1}}

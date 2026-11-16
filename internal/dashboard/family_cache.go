@@ -13,7 +13,7 @@ import (
 
 const (
 	familyCacheFile     = "family-status.json"
-	familyCacheVersion  = 1
+	familyCacheVersion  = 2
 	familyCacheFreshFor = 15 * time.Minute
 )
 
@@ -54,7 +54,9 @@ func readFamilyCache(account *Account) (*control.FamilyInfo, time.Time, bool) {
 		return nil, time.Time{}, false
 	}
 	var record familyCacheRecord
-	if json.Unmarshal(data, &record) != nil || record.Version != familyCacheVersion || record.AccountID != account.ID || record.CheckedAt.IsZero() || record.CheckedAt.After(time.Now().Add(5*time.Minute)) || !validCachedFamily(&record.Family) {
+	// v1 treated absent Apple membership fields as false. Retain positive
+	// records, but require a fresh validated query for old negative records.
+	if json.Unmarshal(data, &record) != nil || (record.Version != familyCacheVersion && !(record.Version == 1 && record.Family.Member)) || record.AccountID != account.ID || record.CheckedAt.IsZero() || record.CheckedAt.After(time.Now().Add(5*time.Minute)) || !validCachedFamily(&record.Family) {
 		return nil, time.Time{}, false
 	}
 	return &record.Family, record.CheckedAt, time.Since(record.CheckedAt) > familyCacheFreshFor

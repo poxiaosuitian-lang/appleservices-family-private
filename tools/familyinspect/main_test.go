@@ -103,3 +103,25 @@ func TestSummarizeFamilyMembersAndAccountBinding(t *testing.T) {
 		t.Fatalf("unexpected member binding %q", got)
 	}
 }
+
+func TestValidateFamilyDetailsDoesNotInventNonMembership(t *testing.T) {
+	for _, value := range []map[string]any{
+		{"status": 0, "status-message": "Success", "age-category": "adult"},
+		{"is-member-of-family": "false"},
+		{"is-member-of-family": true},
+		{"is-member-of-family": false, "family-members": []any{map[string]any{"is-me": true}}},
+		{"is-member-of-family": false, "error": "private"},
+	} {
+		if validateFamilyDetails(value) == nil {
+			t.Fatal("incomplete response accepted as membership evidence")
+		}
+	}
+	for _, value := range []map[string]any{
+		{"is-member-of-family": false},
+		{"is-member-of-family": true, "family-members": []any{map[string]any{"is-me": true, "member-is-organizer": true}}},
+	} {
+		if err := validateFamilyDetails(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

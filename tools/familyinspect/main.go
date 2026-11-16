@@ -1006,6 +1006,9 @@ func run() error {
 		fmt.Printf("family details unavailable; eligibility accepted; eligible-present=%t eligible=%t status-message=%q response-keys=%s; mutation-submitted=false\n", hasEligible, eligible, message, strings.Join(keys, ","))
 		return nil
 	}
+	if err := validateFamilyDetails(details); err != nil {
+		return err
+	}
 	eligible, eligibilityKnown := false, false
 	if !boolValue(details["is-member-of-family"]) {
 		eligibilityRaw := stringValue(urls["checkFamilyEligibility"])
@@ -1881,6 +1884,27 @@ func findStringValue(value any, key string) string {
 		}
 	}
 	return ""
+}
+
+// Missing membership fields are an unknown response, not proof of no family.
+func validateFamilyDetails(details map[string]any) error {
+	if familyResponseError(details) {
+		return errors.New("Apple 家庭详情查询失败，已保留原家庭状态")
+	}
+	member, known := details["is-member-of-family"].(bool)
+	if !known {
+		return errors.New("Apple 未返回家庭成员资格，无法确认母号状态；请在 Apple 家庭共享设置核对后重新核验")
+	}
+	members, hasMembers := details["family-members"].([]any)
+	if member {
+		organizers, _, self, _, _ := summarizeFamilyMembers(members)
+		if !hasMembers || len(members) == 0 || organizers != 1 || self != 1 {
+			return errors.New("Apple 返回的家庭成员列表不完整，已保留原家庭状态")
+		}
+	} else if len(members) > 0 {
+		return errors.New("Apple 返回的家庭资格与成员列表不一致，已保留原家庭状态")
+	}
+	return nil
 }
 
 func familyResponseError(values map[string]any) bool {

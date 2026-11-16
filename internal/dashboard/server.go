@@ -510,6 +510,9 @@ func runFamilyStatus(ctx context.Context, helper string, account *Account, joinS
 	command.Stdout = &output
 	command.Stderr = &output
 	if err := command.Run(); err != nil {
+		if strings.Contains(output.String(), "Apple 未返回家庭成员资格") {
+			return nil, errors.New("Apple 未返回家庭成员资格，无法确认母号状态；请在 Apple 家庭共享设置核对后重新核验")
+		}
 		return nil, errors.New("家庭操作未完成，请刷新状态后核对")
 	}
 	return parseFamilyStatus(output.String())
