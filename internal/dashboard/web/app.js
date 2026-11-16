@@ -524,7 +524,7 @@ function renderOrganizerOptions(accounts, selected) {
     if (account.id === selected || !account.icloud_activated) continue;
     const option = document.createElement('option');
     option.value = account.id;
-    option.textContent = (account.id === poolOrganizerAccount ? '★ 家庭母号 · ' : '') + (account.name || account.id) + ' · ' + account.id;
+    option.textContent = (account.family_organizer ? '★ 家庭母号 · ' : '') + (account.name || account.id) + ' · ' + account.id;
     select.append(option);
   }
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
@@ -557,12 +557,17 @@ function renderAccounts(view) {
     poolOrganizerName = cachedOrganizers[0].name || cachedOrganizers[0].id;
     localStorage.setItem('family-organizer-account', poolOrganizerAccount);
     localStorage.setItem('family-organizer-name', poolOrganizerName);
+  } else if (!cachedOrganizers.some(account => account.id === poolOrganizerAccount)) {
+    poolOrganizerAccount = ''; poolOrganizerName = '';
+    localStorage.removeItem('family-organizer-account');
+    localStorage.removeItem('family-organizer-name');
   }
   renderOrganizerOptions(accounts, view.selected);
   renderFamilyMemberOptions(accounts, view.selected);
   list.replaceChildren();
   for (const account of accounts) {
-    const organizer = account.family_organizer || account.id === poolOrganizerAccount;
+    // A remembered dropdown choice is not evidence of Family Sharing membership.
+    const organizer = !!account.family_organizer;
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'account-item' + (account.id === view.selected ? ' active' : '') + (organizer ? ' family-organizer' : '') + (organizer && account.family_stale ? ' stale-family' : '');
@@ -701,7 +706,7 @@ function render(view) {
   selectedAccount = view.selected || selectedAccount;
   if (view.accounts) renderAccounts(view);
   if (view.family) {
-    const changed = familyAccount !== selectedAccount || !familyInfo || familyCheckedAt !== view.family_checked_at;
+    const changed = familyAccount !== selectedAccount || !familyInfo || familyCheckedAt !== view.family_checked_at || JSON.stringify(familyInfo) !== JSON.stringify(view.family);
     if (changed) renderFamily(view.family, { checkedAt: view.family_checked_at, stale: view.family_stale, animate: false });
     else updateFamilyCacheMeta(view.family_checked_at, view.family_stale, true);
   } else if (familyAccount === selectedAccount && familyInfo) renderFamily(null);
