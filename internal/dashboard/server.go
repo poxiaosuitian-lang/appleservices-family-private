@@ -904,9 +904,7 @@ func (s *Server) startInMode(ctx context.Context, dir string, creds credentials,
 	if strings.TrimSpace(creds.AppleID) == "" || (!resume && creds.Password == "") {
 		return control.Result{Message: "请输入 Apple 账户和密码"}
 	}
-	if creds.TwoFactor == "" {
-		creds.TwoFactor = "sms"
-	}
+	creds.TwoFactor = loginVerificationMethod(creds.TwoFactor, resume)
 	if creds.TwoFactor != "sms" && creds.TwoFactor != "sms-existing" && creds.TwoFactor != "circle" && creds.TwoFactor != "trusted-device" {
 		return control.Result{Message: "不支持的验证方式"}
 	}

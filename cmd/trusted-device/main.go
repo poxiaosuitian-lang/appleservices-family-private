@@ -569,7 +569,26 @@ func run() (runErr error) {
 	defer refresh.Stop()
 	var renewalRecovery renewalRetry
 	defer renewalRecovery.stop()
+	var renewalPending *appleservices.Login
+	renewalFactor := initialVerificationFactor(*method)
+	var renewalLastSent time.Time
+	prepareRenewal := func(candidate *appleservices.Login) {
+		verifyLocal(candidate)
+		if !candidate.NeedsTwoFactor() {
+			return
+		}
+		renewalPending = candidate
+		renewalLastSent = time.Now()
+		if !localVerificationTried && *method != "sms-existing" {
+			if candidate.RequestCode(renewalFactor) != nil {
+				status.LocalVerification = localVerificationRequestFailed
+			}
+		}
+	}
 	beginRenewal := func() (maintainedLogin, error) {
+		if renewalPending != nil {
+			return renewalPending, nil
+		}
 		if *resumeSession || passwordRemembered {
 			saved, err := resumeSavedLogin(appleID, store, options...)
 			if err == nil {
@@ -579,7 +598,7 @@ func run() (runErr error) {
 		}
 		renewed, err := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 		if err == nil {
-			verifyLocal(renewed)
+			prepareRenewal(renewed)
 		}
 		return renewed, err
 	}
@@ -591,10 +610,10 @@ func run() (runErr error) {
 		renewed, devices, err := renewWithReconnect(beginRenewal, func() (maintainedLogin, error) {
 			candidate, loginErr := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 			if loginErr == nil {
-				verifyLocal(candidate)
+				prepareRenewal(candidate)
 			}
 			return candidate, loginErr
-		}, accountID, registration, !*resumeSession && !passwordRemembered, password, &reconnect)
+		}, accountID, registration, renewalPending != nil || !*resumeSession && !passwordRemembered, password, &reconnect)
 		if err != nil {
 			status.State = "refresh_failed"
 			if transientLoginFailure(err) {
@@ -604,6 +623,16 @@ func run() (runErr error) {
 			}
 			if errors.Is(err, errVerificationRequired) || reconnect.blocked {
 				status.State, status.VerificationRequired = "verification_required", true
+				status.Authenticated = false
+				if renewalPending != nil && renewalPending.NeedsTwoFactor() {
+					status.State = "awaiting_device_code"
+					if renewalFactor == appleservices.SMS {
+						status.State = "awaiting_sms"
+					}
+				}
+				if panel != nil {
+					panel.SetReady(false)
+				}
 			}
 			status.save(*dir)
 			return control.Result{Message: "续登录失败，请检查登录状态"}
@@ -614,9 +643,12 @@ func run() (runErr error) {
 			}
 		}
 		active = renewed
+		renewalPending = nil
+		status.VerificationRequired = false
 		renewalRecovery.stop()
 		reconnect.blocked = false
 		if panel != nil {
+			panel.SetReady(!*listenOnly)
 			ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
 			panel.SetStoreSessionReady(ok && ready.StorePurchaseSessionReady())
 		}
@@ -1615,6 +1647,16 @@ func run() (runErr error) {
 			if command.Context.Err() != nil {
 				continue
 			}
+			if renewalPending != nil && renewalPending.NeedsTwoFactor() && status.VerificationRequired {
+				result, completed := pendingVerificationAction(renewalPending, renewalFactor, command.Action.Action, command.Code, &renewalLastSent, time.Now())
+				if completed {
+					status.VerificationRequired = false
+					reconnect.blocked = false
+					result = renew()
+				}
+				command.Reply <- result
+				continue
+			}
 			if (command.Action.Action == "allow" || command.Action.Action == "deny") && command.RequestID == "" {
 				command.Reply <- control.Result{Message: "请重新查看当前登录请求"}
 				continue
@@ -1629,9 +1671,6 @@ func run() (runErr error) {
 			}
 		case <-refresh.C:
 			result := renew()
-			if status.VerificationRequired {
-				return errVerificationRequired
-			}
 			if result.OK {
 				fmt.Printf("Session renewed. Device query succeeded: count=%d, installation_visible=%t.\n", status.DeviceCount, status.InstallationVisible)
 			} else {

@@ -60,6 +60,26 @@ func TestNetworkFailureDuringPasswordFallbackDoesNotRequireOTP(t *testing.T) {
 	}
 }
 
+func TestPendingRenewalResumesVerifiedCandidateWithoutAnotherPasswordLogin(t *testing.T) {
+	gate := reconnectGate{}
+	candidate := &fakeMaintainedLogin{account: "owner", challenge: true}
+	freshCalls := 0
+	fresh := func() (maintainedLogin, error) { freshCalls++; return candidate, nil }
+	begin := func() (maintainedLogin, error) { return nil, &icloud.StorageError{HTTPStatus: 401} }
+	_, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if !errors.Is(err, errVerificationRequired) || !gate.blocked || candidate.saved != 0 {
+		t.Fatal("challenge not retained as unverified")
+	}
+	// Verification completes on the existing challenge. Adoption still needs
+	// same-account identity, registration and a successful readback.
+	candidate.challenge = false
+	resume := func() (maintainedLogin, error) { return candidate, nil }
+	got, _, err := renewWithReconnect(resume, fresh, "owner", appleservices.DeviceRegistration{}, true, "fixture", &gate)
+	if err != nil || got != candidate || gate.blocked || freshCalls != 1 || candidate.saved != 1 || candidate.registered != 1 {
+		t.Fatal("verified candidate was not adopted without restarting login")
+	}
+}
+
 func TestTransientLoginFailureClassification(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
