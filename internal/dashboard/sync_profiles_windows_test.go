@@ -130,6 +130,11 @@ func TestSyncProfilesAPIOnlyExposesMetadata(t *testing.T) {
 		return w
 	}
 	input, _ := json.Marshal(syncProfileInput{Operation: "save", URL: "https://one.example.test", Token: secret})
+	defaultInput, _ := json.Marshal(syncProfileInput{Operation: "set-default", Token: "dEf456"})
+	w := call("POST", string(defaultInput), s.token)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "dEf456") || !strings.Contains(w.Body.String(), `"default_key_saved":true`) {
+		t.Fatal("default key metadata missing or secret exposed")
+	}
 	if call("POST", string(input), "").Code != 403 {
 		t.Fatal("unauthorized save allowed")
 	}
@@ -148,5 +153,37 @@ func TestSyncProfilesAPIOnlyExposesMetadata(t *testing.T) {
 	raw, _ := os.ReadFile(file)
 	if string(raw) != "corrupt-fixture" {
 		t.Fatal("corrupt file lost")
+	}
+}
+
+func TestDefaultSyncKeyPersistsAndRotationKeepsBindings(t *testing.T) {
+	s := &Server{config: Config{Dir: t.TempDir()}}
+	if _, err := s.changeSyncProfiles(syncProfileInput{Operation: "set-default", Token: "12345"}); err == nil {
+		t.Fatal("short default key accepted")
+	}
+	if _, err := s.changeSyncProfiles(syncProfileInput{Operation: "set-default", Token: "dEf456"}); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Server{config: s.config}
+	value, err := restarted.changeSyncProfiles(syncProfileInput{Operation: "save", URL: "https://one.example.test"})
+	if err != nil || value.Profiles[0].Token != "dEf456" {
+		t.Fatal("default key not restored", err)
+	}
+	p := &value.Profiles[0]
+	p.RecoverySources = map[string]string{"fixture": "bound-source"}
+	if err := restarted.writeSyncProfiles(value); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := restarted.changeSyncProfiles(syncProfileInput{Operation: "save", ID: p.ID, URL: p.URL, Token: "newKey"})
+	if err != nil || rotated.Profiles[0].RecoverySources["fixture"] != "bound-source" || rotated.Profiles[0].RecoveryRevision <= p.RecoveryRevision {
+		t.Fatal("rotation lost account binding or did not resume listener", err)
+	}
+	kept, err := restarted.changeSyncProfiles(syncProfileInput{Operation: "save", ID: p.ID, URL: p.URL})
+	if err != nil || kept.Profiles[0].Token != "newKey" {
+		t.Fatal("default overwrote existing key", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(s.config.Dir, "sync-profiles.dpapi"))
+	if err != nil || bytes.Contains(raw, []byte("dEf456")) || bytes.Contains(raw, []byte("newKey")) {
+		t.Fatal("key not encrypted", err)
 	}
 }

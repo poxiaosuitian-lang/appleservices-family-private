@@ -14,16 +14,18 @@ import (
 )
 
 type syncProfile struct {
-	RecoverySources map[string]string          `json:"recovery_sources,omitempty"`
-	RecoveryHandled map[string]recoveryAttempt `json:"recovery_handled,omitempty"`
-	ID              string                     `json:"id"`
-	URL             string                     `json:"url"`
-	Token           string                     `json:"token"`
+	RecoveryRevision uint64                     `json:"recovery_revision,omitempty"`
+	RecoverySources  map[string]string          `json:"recovery_sources,omitempty"`
+	RecoveryHandled  map[string]recoveryAttempt `json:"recovery_handled,omitempty"`
+	ID               string                     `json:"id"`
+	URL              string                     `json:"url"`
+	Token            string                     `json:"token"`
 }
 type syncProfiles struct {
-	Version  int           `json:"version"`
-	Selected string        `json:"selected"`
-	Profiles []syncProfile `json:"profiles"`
+	Version      int           `json:"version"`
+	Selected     string        `json:"selected"`
+	Profiles     []syncProfile `json:"profiles"`
+	DefaultToken string        `json:"default_token,omitempty"`
 }
 type syncProfileInput struct {
 	Operation string `json:"operation"`
@@ -107,6 +109,11 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 		}
 	}
 	switch input.Operation {
+	case "set-default":
+		if len(input.Token) < 6 || len(input.Token) > 512 || strings.ContainsAny(input.Token, " \t\r\n") {
+			return value, errors.New("默认同步密钥至少 6 位且不能包含空白")
+		}
+		value.DefaultToken = input.Token
 	case "save":
 		address := strings.TrimRight(strings.TrimSpace(input.URL), "/")
 		if len(address) > 2048 {
@@ -122,6 +129,9 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 		if token == "" && index >= 0 && value.Profiles[index].URL == address {
 			token = value.Profiles[index].Token
 		}
+		if token == "" {
+			token = value.DefaultToken
+		}
 		if len(token) < 6 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
 			return value, errors.New("请填写至少 6 位的同步密钥；更换地址时需重新填写")
 		}
@@ -136,12 +146,13 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 			value.Profiles = append(value.Profiles, syncProfile{ID: hex.EncodeToString(id)})
 			index = len(value.Profiles) - 1
 		}
-		if value.Profiles[index].URL != address || value.Profiles[index].Token != token {
+		if value.Profiles[index].URL != address {
 			value.Profiles[index].RecoverySources = nil
 			value.Profiles[index].RecoveryHandled = nil
 		}
 		value.Profiles[index].URL = address
 		value.Profiles[index].Token = token
+		value.Profiles[index].RecoveryRevision++
 		value.Selected = value.Profiles[index].ID
 	case "delete":
 		if index < 0 {
@@ -204,9 +215,10 @@ func (s *Server) serveSyncProfiles(w http.ResponseWriter, r *http.Request) {
 		public = append(public, item)
 	}
 	json.NewEncoder(w).Encode(struct {
-		Selected string              `json:"selected"`
-		Profiles []syncProfilePublic `json:"profiles"`
-	}{value.Selected, public})
+		Selected        string              `json:"selected"`
+		Profiles        []syncProfilePublic `json:"profiles"`
+		DefaultKeySaved bool                `json:"default_key_saved"`
+	}{value.Selected, public, value.DefaultToken != ""})
 }
 func (s *Server) resolveSyncProfile(id, address string) (syncProfile, error) {
 	s.syncProfilesMu.Lock()

@@ -276,15 +276,14 @@ function updateFamilyCacheMeta(checkedAt = '', stale = false, hasInfo = !!family
   familyCheckedAt = checkedAt || '';
   familyStale = !!stale;
   const shell = $('familyCard');
-  shell.classList.toggle('cache-stale', familyStale);
+  shell.classList.remove('cache-stale');
   if (!hasInfo) {
     $('familyCacheNote').textContent = '尚无本地状态';
     $('familyRefreshButton').textContent = '读取 Apple 状态';
     return;
   }
-  const key = autoRefreshKey('family', familyCheckedAt), state = autoRefreshState.get(key) || autoRefreshAttemptStatus(key);
-  $('familyCacheNote').textContent = cacheLabel('family', familyCheckedAt, familyStale);
-  $('familyRefreshButton').textContent = state === 'refreshing' ? '正在核验…' : '重新核验 Apple';
+  $('familyCacheNote').textContent = '上次刷新 · ' + (familyCheckedAt ? time(familyCheckedAt) : '刚刚');
+  $('familyRefreshButton').textContent = '刷新家庭状态';
 }
 
 function renderFamily(info, { checkedAt = '', stale = false, animate = true } = {}) {
@@ -543,7 +542,7 @@ function renderFamilyMemberOptions(accounts, organizerID) {
   placeholder.textContent = '选择家庭成员';
   select.append(placeholder);
   for (const account of accounts) {
-    if (account.id === organizerID || !account.family_member || account.family_organizer || account.family_stale || account.family_organizer_account !== organizerID) continue;
+    if (account.id === organizerID || !account.family_member || account.family_organizer || account.family_organizer_account !== organizerID) continue;
     const option = document.createElement('option');
     option.value = account.id;
     option.textContent = (account.name || account.id) + ' · ' + account.id;
@@ -578,7 +577,7 @@ function renderAccounts(view) {
     const organizer = !!account.family_organizer;
     const item = document.createElement('button');
     item.type = 'button';
-    item.className = 'account-item' + (account.id === view.selected ? ' active' : '') + (organizer ? ' family-organizer' : '') + (organizer && account.family_stale ? ' stale-family' : '');
+    item.className = 'account-item' + (account.id === view.selected ? ' active' : '') + (organizer ? ' family-organizer' : '');
     const avatar = document.createElement('span');
     avatar.className = 'account-avatar';
     avatar.textContent = organizer ? '★' : (account.name || '?').slice(0, 1).toUpperCase();
@@ -589,7 +588,7 @@ function renderAccounts(view) {
     if (organizer) {
       const role = document.createElement('span');
       role.className = 'account-role';
-      role.textContent = account.family_stale ? '母号待核验' : '母号';
+      role.textContent = '母号';
       strong.append(role);
     }
     const small = document.createElement('small');
@@ -644,9 +643,8 @@ function renderLoginState() {
 }
 
 function scheduleAutoRefresh(view, activated) {
-  if (busy || $('loginDialog').open || autoRefreshScheduled || !activated) return;
+  if (busy || document.querySelector('dialog[open]') || autoRefreshScheduled || !activated) return;
   const candidates = [];
-  if (view.family && view.family_stale) candidates.push({ kind: 'family', action: 'family-info', checkedAt: view.family_checked_at });
   if (view.storage && view.storage_stale) candidates.push({ kind: 'storage', action: 'storage-info', checkedAt: view.storage_checked_at });
   if (view.storage_plan && view.storage_plan_stale) candidates.push({ kind: 'plan', action: 'storage-plan', checkedAt: view.storage_plan_checked_at });
   if (!candidates.length) { releaseAutoRefreshLease(selectedAccount); return; }
@@ -657,12 +655,11 @@ function scheduleAutoRefresh(view, activated) {
   markAutoRefreshAttempt(key);
   autoRefreshState.set(key, 'refreshing');
   autoRefreshScheduled = true;
-  if (target.kind === 'family') updateFamilyCacheMeta(view.family_checked_at, true, true);
   if (target.kind === 'storage') renderStorage(view.storage, { checkedAt: view.storage_checked_at, stale: true });
   if (target.kind === 'plan') renderPlans(view.storage_plan, { checkedAt: view.storage_plan_checked_at, stale: true });
   window.setTimeout(() => {
     autoRefreshScheduled = false;
-    if (account !== selectedAccount || busy || $('loginDialog').open) {
+    if (account !== selectedAccount || busy || document.querySelector('dialog[open]')) {
       autoRefreshState.delete(key);
       clearAutoRefreshAttempt(key);
       releaseAutoRefreshLease(account);
@@ -877,13 +874,13 @@ function render(view) {
   $('purchaseButton').title = $('purchaseButton').disabled ? cloudHint : '确认开通 iCloud+ 50GB';
 
   if (familyAccount && familyAccount !== selectedAccount) renderFamily(null);
-  const selectedFamily = familyAccount === selectedAccount ? familyInfo : null, familyRefreshing = autoRefreshAttemptStatus(autoRefreshKey('family', view.family_checked_at)) === 'refreshing';
-  $('familyRefreshButton').disabled = busy || familyRefreshing || !activated;
-  $('familyOrganizer').disabled = busy || !online || !!selectedFamily?.member || familyStale;
-  $('familyAddButton').disabled = busy || !online || !view.control_ready || !!selectedFamily?.member || familyStale || !$('familyOrganizer').value;
-  $('familyJoinStorageButton').disabled = busy || !activated || familyStale || !selectedFamily?.member || !selectedFamily?.storage_known || !selectedFamily?.storage_available || selectedFamily?.storage_participating;
-  $('familyRemoveMember').disabled = busy || familyStale || !selectedFamily?.organizer;
-  $('familyRemoveButton').disabled = busy || familyStale || !selectedFamily?.organizer || !$('familyRemoveMember').value;
+  const selectedFamily = familyAccount === selectedAccount ? familyInfo : null;
+  $('familyRefreshButton').disabled = busy || !activated;
+  $('familyOrganizer').disabled = busy || !online || !!selectedFamily?.member;
+  $('familyAddButton').disabled = busy || !online || !view.control_ready || !!selectedFamily?.member || !$('familyOrganizer').value;
+  $('familyJoinStorageButton').disabled = busy || !activated || !selectedFamily?.member || !selectedFamily?.storage_known || !selectedFamily?.storage_available || selectedFamily?.storage_participating;
+  $('familyRemoveMember').disabled = busy || !selectedFamily?.organizer;
+  $('familyRemoveButton').disabled = busy || !selectedFamily?.organizer || !$('familyRemoveMember').value;
 
   const ownHME = hasPaidStorage(view) && !view.storage_stale;
   const hmeEligible = ownHME || (!!selectedFamily?.member && !selectedFamily?.organizer && selectedFamily?.storage_known && selectedFamily?.storage_participating && selectedFamily?.storage_available && selectedFamily?.storage_enabled);
@@ -1022,19 +1019,8 @@ function purchaseOutcomeMessage(result) {
 async function action(name, extra = {}, options = {}) {
   if (busy) return;
   if (name.startsWith('hme-') && !name.startsWith('hme-server-') && familyStale && !(hasPaidStorage(current) && !current?.storage_stale)) {
-    try {
-      busy = true; document.body.classList.add('busy'); if (current) render(current);
-      const refreshed = await api('action', { action: 'family-info' });
-      if (!refreshed.ok || !refreshed.family?.member || refreshed.family.organizer) throw new Error(refreshed.message || '子号家庭状态核验未完成');
-      const checkedAt = new Date().toISOString();
-      if (current) { current.family = refreshed.family; current.family_checked_at = checkedAt; current.family_stale = false; }
-      renderFamily(refreshed.family, { checkedAt, stale: false });
-    } catch (error) {
-      notice(error.message, true);
-      return;
-    } finally {
-      busy = false; document.body.classList.remove('busy'); if (current) render(current);
-    }
+    notice('请先手动刷新家庭状态，再操作隐私邮箱', true);
+    return;
   }
   const actionAccount = selectedAccount, actionPID = current?.status?.pid || 0, actionRefresh = current?.status?.last_refresh_at || '', actionVerificationContext = verificationContext;
   const familyAction = name.startsWith('family-'), hmeAction = name.startsWith('hme-');
@@ -1471,7 +1457,7 @@ setInterval(poll, 2500);
 setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
-let syncProfiles = [], syncConfigBusy = false, syncPending = null, syncImported = null;
+let syncProfiles = [], syncDefaultKeySaved = false, syncConfigBusy = false, syncPending = null, syncImported = null;
 function renderSyncVerification(result, preserveSource) {
   const source = $('serverSyncOTPSource');
   const previous = source.value;
@@ -1511,8 +1497,8 @@ function selectSyncProfile(id) {
   $('serverSyncProfile').value = profile?.id || '';
   $('serverSyncURL').value = profile?.url || '';
   $('serverSyncToken').value = '';
-  $('serverSyncToken').required = !profile?.key_saved;
-  $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : '';
+  $('serverSyncToken').required = !profile?.key_saved && !syncDefaultKeySaved;
+  $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '';
   $('serverSyncDelete').disabled = !profile;
   $('serverRecoveryEnabled').checked = profile?.recovery_enabled ?? true;
   $('serverRecoveryStatus').textContent = profile?.recovery_enabled ? (profile.recovery_status?.message || '已启用，等待服务器请求') : '';
@@ -1520,6 +1506,7 @@ function selectSyncProfile(id) {
 }
 function renderSyncProfiles(data) {
   syncProfiles = data.profiles;
+  syncDefaultKeySaved = !!data.default_key_saved;
   const select = $('serverSyncProfile');
   select.replaceChildren(new Option('新增服务器', ''));
   syncProfiles.forEach((profile, index) => select.add(new Option(`${index + 1}. ${profile.url}`, profile.id)));
@@ -1561,8 +1548,8 @@ $('serverSyncURL').addEventListener('input', () => {
   resetSyncLogin();
   const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
   const unchanged = profile?.url === $('serverSyncURL').value.trim().replace(/\/+$/, '');
-  $('serverSyncToken').required = !unchanged;
-  $('serverSyncToken').placeholder = unchanged ? '已加密保存，留空不更换' : '请输入此服务器的密钥';
+  $('serverSyncToken').required = !unchanged && !syncDefaultKeySaved;
+  $('serverSyncToken').placeholder = unchanged ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '请输入此服务器的密钥';
 });
 $('serverSyncSave').addEventListener('click', async () => {
   if (syncConfigBusy || !$('serverSyncForm').reportValidity()) return;
@@ -1580,11 +1567,13 @@ $('serverSyncDelete').addEventListener('click', async () => {
 });
 $('serverSyncForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (busy || syncConfigBusy || selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) return;
+  if (busy || syncConfigBusy) { syncFeedback('正在处理其他操作，请稍后再试', true); return; }
+  if (selectedAccount !== serverSyncAccount || current?.status?.pid !== serverSyncPID) { syncFeedback('账号连接已变化，请重新打开同步窗口', true); return; }
   const account = serverSyncAccount, pid = serverSyncPID;
   const sameSession = () => $('serverSyncDialog').open && selectedAccount === account && current?.status?.pid === pid;
   syncConfigLock(true);
   busy = true;
+  syncFeedback('正在保存服务器配置…');
   try {
     const pending = syncPending;
     const recoveryEnabled = $('serverRecoveryEnabled').checked;
@@ -1642,6 +1631,10 @@ $('serverRecoveryEnabled').addEventListener('change', async () => {
   const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
   if (!profile) return;
   const enabled = $('serverRecoveryEnabled').checked;
+  if (enabled && !profile.recovery_enabled && !syncImported) {
+    $('serverRecoveryStatus').textContent = '同步完成后启用';
+    return;
+  }
   syncConfigLock(true);
   try {
     await api('sync-recovery', {profile_id:profile.id,url:profile.url,enabled});

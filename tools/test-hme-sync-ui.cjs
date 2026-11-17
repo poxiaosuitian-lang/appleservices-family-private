@@ -4,7 +4,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({headless:true, channel:process.env.BROWSER_CHANNEL || 'msedge'});
   try {
     const page = await browser.newPage(), errors = [], actions = [];
-    let profiles = [], selected = '', nextID = 1, loginCalls = 0, loginMode = 'manual', prepareOK = false;
+    let profiles = [], selected = '', nextID = 1, loginCalls = 0, loginMode = 'manual', prepareOK = false, defaultKeySaved = false;
     const view = {selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:0},storage_stale:false};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
@@ -25,12 +25,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           const input = request.postDataJSON();
           if (input.operation === 'save') {
             let profile = profiles.find(p => p.id === input.id);
-            if (!profile) { assert(input.token.length >= 6); profile = {id:String(nextID++),key_saved:true}; profiles.push(profile); }
+            if (!profile) { assert(input.token.length >= 6 || (defaultKeySaved && input.token === '')); profile = {id:String(nextID++),key_saved:true}; profiles.push(profile); }
             profile.url = input.url; selected = profile.id;
           } else if (input.operation === 'select') selected = input.id;
           else if (input.operation === 'delete') { profiles = profiles.filter(p => p.id !== input.id); selected = profiles[0]?.id || ''; }
         }
-        return route.fulfill({json:{selected,profiles}});
+        return route.fulfill({json:{selected,profiles,default_key_saved:defaultKeySaved}});
       }
       if (url.pathname === '/api/action') {
         const input = request.postDataJSON();
@@ -63,6 +63,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert(await page.locator('#serverSyncButton').isEnabled());
     assert(await page.locator('#hmeCard').isHidden());
     await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>!syncConfigBusy);
+    await page.evaluate(()=>scheduleAutoRefresh({storage:{total_bytes:1},storage_stale:true,storage_checked_at:'fixture-stale'},true));
+    assert.equal(await page.evaluate(()=>autoRefreshScheduled),false);
     await page.locator('#serverSyncURL').fill('https://one.example.test');
     await page.locator('#serverSyncToken').fill('k'.repeat(6));
     await page.locator('#serverSyncSave').click();
@@ -84,8 +87,11 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(()=>document.getElementById('serverRecoveryStatus').textContent==='已关闭');
     assert.equal(profiles[0].recovery_enabled,false);
     await page.locator('#serverRecoveryEnabled').check();
-    await page.waitForFunction(()=>document.getElementById('serverRecoveryStatus').textContent.includes('已启用'));
-    assert.equal(profiles[0].recovery_enabled,true);
+    await page.waitForFunction(()=>document.getElementById('serverRecoveryStatus').textContent.includes('同步完成后启用'));
+    assert.equal(profiles[0].recovery_enabled,false); // Never register a source before importing it.
+    await page.evaluate(()=>{busy=true;$('serverSyncForm').dispatchEvent(new Event('submit',{cancelable:true}));busy=false;});
+    assert((await page.locator('#serverSyncFeedback').textContent()).includes('正在处理其他操作'));
+    assert.equal(actions.length,0);
     await page.locator('#serverSyncForm button[type=submit]').click();
     await page.waitForFunction(()=>!document.getElementById('serverSyncOTPRow').hidden);
     assert.equal(actions.length,2);
@@ -148,6 +154,19 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
     assert.equal(actions.at(-1).action,'hme-server-login');
     assert.equal(actions.length,familyStart+5); // No repeated password creation or import.
+    await page.locator('#serverSyncClose').click();
+    defaultKeySaved = true;
+    await page.reload();
+    await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>!syncConfigBusy);
+    await page.locator('#serverSyncProfile').selectOption('');
+    assert.equal(await page.locator('#serverSyncToken').inputValue(),'');
+    assert.equal(await page.locator('#serverSyncToken').getAttribute('required'),null);
+    assert((await page.locator('#serverSyncToken').getAttribute('placeholder')).includes('默认密钥'));
+    await page.locator('#serverSyncURL').fill('https://default.example.test');
+    await page.locator('#serverSyncSave').click();
+    await page.waitForFunction(()=>!syncConfigBusy);
+    assert.equal(profiles.at(-1).url,'https://default.example.test');
     assert.deepEqual(errors,[]);
     console.log('PASS: unsubscribed account sync, save, reload, switch, key masking, sync by profile ID, changed-host validation deletion, automatic server login and manual OTP continuation');
   } finally { await browser.close(); }

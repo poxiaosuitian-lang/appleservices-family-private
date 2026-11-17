@@ -3,11 +3,33 @@ package hmesync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestRecoveryConfigurationErrorsAreIdentifiable(t *testing.T) {
+	for _, status := range []int{401, 403, 409, 429} {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		client := &RecoveryClient{server.Client()}
+		_, err := client.Wait(context.Background(), server.URL, "s1xKey", "fixture", []string{SourceID("owner@example.test")})
+		server.Close()
+		if err == nil {
+			t.Fatal("rejected request treated as success")
+		}
+		if (status == 401 || status == 403) && !errors.Is(err, ErrSyncUnauthorized) {
+			t.Fatal("authentication failure not classified")
+		}
+		if status == 409 && !errors.Is(err, ErrRecoveryBinding) {
+			t.Fatal("binding failure not classified")
+		}
+		if status == 429 && !strings.Contains(err.Error(), "429") {
+			t.Fatal("rate limit not reported")
+		}
+	}
+}
 
 func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
 	for _, mode := range []string{"idle", "job", "web", "wrong-account", "wrong-kind", "bad-lease", "redirect", "unsupported"} {

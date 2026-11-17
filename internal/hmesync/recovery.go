@@ -105,6 +105,15 @@ func (c *RecoveryClient) call(ctx context.Context, base, token, operation string
 		return errors.New("服务器任务连接中断，稍后重新连接")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return ErrSyncUnauthorized
+	}
+	if resp.StatusCode == 409 && operation == "wait" {
+		return ErrRecoveryBinding
+	}
+	if resp.StatusCode == 429 {
+		return errors.New("服务器已限流（HTTP 429），稍后恢复连接")
+	}
 	if resp.StatusCode == 404 {
 		return errors.New("服务器尚未部署按需登录恢复接口")
 	}

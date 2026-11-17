@@ -18,6 +18,9 @@ import (
 
 const Path = "/api/integrations/appleservices/accounts"
 
+var ErrSyncUnauthorized = errors.New("同步密钥不匹配，请将本机和服务器设置为同一密钥（HTTP 401/403）")
+var ErrRecoveryBinding = errors.New("账号尚未完成服务器同步，请先确认同步（HTTP 409）")
+
 type Payload struct {
 	Version     int               `json:"version"`
 	SourceID    string            `json:"source_id"`
@@ -84,7 +87,9 @@ func importWithClient(ctx context.Context, base, token string, payload Payload, 
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case 401, 403:
-		return "", errors.New("服务器未接受同步密钥，请使用专用导入密钥")
+		return "", ErrSyncUnauthorized
+	case 429:
+		return "", errors.New("服务器已限流（HTTP 429），请稍后手动重试；尚未完成同步")
 	case 404:
 		return "", errors.New("服务器尚未安装账号对接接口，请先执行服务器改造提示词")
 	case 409:

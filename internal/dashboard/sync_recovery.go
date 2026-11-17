@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -62,6 +63,7 @@ func (s *Server) serveSyncRecovery(w http.ResponseWriter, r *http.Request) {
 		} else {
 			delete(p.RecoverySources, account.ID)
 		}
+		p.RecoveryRevision++
 		if s.writeSyncProfiles(value) != nil {
 			http.Error(w, `{"message":"无法保存按需恢复配置"}`, 400)
 			return
@@ -154,6 +156,11 @@ func (s *Server) listenRecovery(ctx context.Context, p syncProfile) {
 		if err != nil {
 			failures++
 			s.setRecoveryStatus(p.ID, "disconnected", err.Error())
+			// Configuration errors require a changed key/binding, not retries.
+			// The listener supervisor restarts when that profile changes.
+			if errors.Is(err, hmesync.ErrSyncUnauthorized) || errors.Is(err, hmesync.ErrRecoveryBinding) {
+				return
+			}
 			if !waitRecovery(ctx, time.Duration(1<<min(failures, 6))*time.Second) {
 				return
 			}

@@ -67,11 +67,11 @@ const web = path.join(__dirname, '../internal/dashboard/web');
 
     // A scheduled cache refresh must yield when the user opens login.
     await page.evaluate(() => {
-      scheduleAutoRefresh({ family: { member: true }, family_stale: true, family_checked_at: 'fixture' }, true);
+      scheduleAutoRefresh({ storage: { total_bytes: 1 }, storage_stale: true, storage_checked_at: 'fixture' }, true);
       openLogin('add');
     });
     await page.waitForFunction(() => !autoRefreshScheduled);
-    await page.evaluate(() => scheduleAutoRefresh({ family: { member: true }, family_stale: true }, true));
+    await page.evaluate(() => scheduleAutoRefresh({ storage: { total_bytes: 1 }, storage_stale: true }, true));
     assert.equal(await page.evaluate(() => autoRefreshScheduled), false);
     assert.deepEqual(mutations, []);
 
