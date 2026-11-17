@@ -31,7 +31,7 @@ func TestImportValidatesAcknowledgementAndNeverRedirectsOrLeaks(t *testing.T) {
 				if r.URL.Path != Path {
 					t.Error("followed redirect")
 				}
-				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 32) {
+				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 6) {
 					t.Error("missing authorization")
 				}
 				var received Payload
@@ -61,7 +61,7 @@ func TestImportValidatesAcknowledgementAndNeverRedirectsOrLeaks(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"id": "acc_test", "source_id": source, "status": "active", "hme_verified": true, "imap_verified": mode != "partial"}})
 			}))
 			defer server.Close()
-			id, err := importWithClient(context.Background(), server.URL, strings.Repeat("k", 32), p, server.Client())
+			id, err := importWithClient(context.Background(), server.URL, strings.Repeat("k", 6), p, server.Client())
 			if mode == "ok" {
 				if err != nil || id != "acc_test" {
 					t.Fatal(id, err)

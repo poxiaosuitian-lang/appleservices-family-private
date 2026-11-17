@@ -96,7 +96,7 @@ func loginCall(ctx context.Context, client *http.Client, base, token string, pay
 		return nil, err
 	}
 	endpoint = strings.TrimSuffix(endpoint, Path) + LoginPath
-	if len(token) < 32 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
+	if len(token) < 6 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
 		return nil, errors.New("同步密钥无效")
 	}
 	raw, err := json.Marshal(payload)

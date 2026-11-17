@@ -25,7 +25,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           const input = request.postDataJSON();
           if (input.operation === 'save') {
             let profile = profiles.find(p => p.id === input.id);
-            if (!profile) { assert(input.token.length >= 32); profile = {id:String(nextID++),key_saved:true}; profiles.push(profile); }
+            if (!profile) { assert(input.token.length >= 6); profile = {id:String(nextID++),key_saved:true}; profiles.push(profile); }
             profile.url = input.url; selected = profile.id;
           } else if (input.operation === 'select') selected = input.id;
           else if (input.operation === 'delete') { profiles = profiles.filter(p => p.id !== input.id); selected = profiles[0]?.id || ''; }
@@ -64,7 +64,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert(await page.locator('#hmeCard').isHidden());
     await page.locator('#serverSyncButton').click();
     await page.locator('#serverSyncURL').fill('https://one.example.test');
-    await page.locator('#serverSyncToken').fill('k'.repeat(32));
+    await page.locator('#serverSyncToken').fill('k'.repeat(6));
     await page.locator('#serverSyncSave').click();
     await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('已加密保存'));
     assert.equal(await page.locator('#serverSyncToken').inputValue(),'');
@@ -96,7 +96,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('#serverSyncSubmit').click();
     await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('均已就绪'));
     assert.equal(actions.length,3); assert.equal(loginCalls,2);
-    assert.equal(await page.evaluate(()=>JSON.stringify(localStorage).includes('k'.repeat(32))),false);
+    assert.equal(await page.evaluate(()=>JSON.stringify(localStorage).includes('k'.repeat(6))),false);
     await page.locator('#serverSyncButton').click();
     await page.waitForFunction(()=>document.getElementById('serverSyncProfile').value==='1');
     await page.locator('#serverSyncURL').fill('https://changed.example.test');

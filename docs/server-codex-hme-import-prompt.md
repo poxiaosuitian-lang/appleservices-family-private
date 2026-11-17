@@ -8,7 +8,7 @@
 
 `POST /api/integrations/appleservices/accounts`
 
-鉴权：`Authorization: Bearer <专用同步密钥>`。新增环境变量 `ICLOUD_HME_IMPORT_TOKEN`，至少 32 个随机字符，不允许空白；未配置时关闭此接口。不要复用或扩大现有 `ICLOUD_HME_API_TOKEN` 权限，不要改变管理员会话或 CSRF 规则。此接口仅凭专用 Bearer 认证，不使用浏览器 Cookie，所以无需 CSRF。恒定时间比较，限制请求大小（建议 256 KiB）及失败频率。通过 HTTPS 反向代理提供；本地客户端禁止 HTTP、URL 内凭据、跳转以及自动重试。
+鉴权：`Authorization: Bearer <专用同步密钥>`。新增环境变量 `ICLOUD_HME_IMPORT_TOKEN`，至少 6 个字符（建议使用更长的随机密钥），不允许空白；未配置时关闭此接口。不要复用或扩大现有 `ICLOUD_HME_API_TOKEN` 权限，不要改变管理员会话或 CSRF 规则。此接口仅凭专用 Bearer 认证，不使用浏览器 Cookie，所以无需 CSRF。恒定时间比较，限制请求大小（建议 256 KiB）及失败频率。通过 HTTPS 反向代理提供；本地客户端禁止 HTTP、URL 内凭据、跳转以及自动重试。
 
 请求 JSON（示例全部是假值）：
 

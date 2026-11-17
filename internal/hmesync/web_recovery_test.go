@@ -39,7 +39,7 @@ func TestWebRecoveryBoundTransferAndNoRedirect(t *testing.T) {
 			defer server.Close()
 			client := &RecoveryClient{server.Client()}
 			client.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-			result, err := client.refreshWebSession(context.Background(), server.URL, strings.Repeat("k", 32), WebRecoveryPayload{Version: 1, ClientID: strings.Repeat("c", 32), JobID: "job_fixture", Lease: strings.Repeat("a", 64), SourceID: source, AppleID: "owner@example.test", Host: "icloud.com", Cookies: map[string]string{"fixture": "test-secret"}})
+			result, err := client.refreshWebSession(context.Background(), server.URL, strings.Repeat("k", 6), WebRecoveryPayload{Version: 1, ClientID: strings.Repeat("c", 32), JobID: "job_fixture", Lease: strings.Repeat("a", 64), SourceID: source, AppleID: "owner@example.test", Host: "icloud.com", Cookies: map[string]string{"fixture": "test-secret"}})
 			if (mode == "ready") != (err == nil) || calls != 1 {
 				t.Fatal("unverified recovery or automatic retry")
 			}

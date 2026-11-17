@@ -23,7 +23,7 @@ func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
 				if json.NewDecoder(r.Body).Decode(&input) != nil || len(input.Sources) != 1 || input.Sources[0] != source {
 					t.Error("unbound request")
 				}
-				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 32) {
+				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 6) {
 					t.Error("missing token")
 				}
 				if mode == "redirect" {
@@ -54,7 +54,7 @@ func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
 			defer srv.Close()
 			c := &RecoveryClient{srv.Client()}
 			c.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-			job, err := c.Wait(context.Background(), srv.URL, strings.Repeat("k", 32), "local-fixture", []string{source})
+			job, err := c.Wait(context.Background(), srv.URL, strings.Repeat("k", 6), "local-fixture", []string{source})
 			if mode == "idle" {
 				if err != nil || job != nil {
 					t.Fatal("idle queue triggered work")
@@ -92,10 +92,10 @@ func TestRecoveryCompletionContainsOnlyOutcome(t *testing.T) {
 	}))
 	defer server.Close()
 	client := &RecoveryClient{server.Client()}
-	if err := client.Complete(context.Background(), server.URL, strings.Repeat("k", 32), "local", job, "ready"); err != nil {
+	if err := client.Complete(context.Background(), server.URL, strings.Repeat("k", 6), "local", job, "ready"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Complete(context.Background(), server.URL, strings.Repeat("k", 32), "local", job, "secret"); err == nil {
+	if err := client.Complete(context.Background(), server.URL, strings.Repeat("k", 6), "local", job, "secret"); err == nil {
 		t.Fatal("unrestricted outcome")
 	}
 }

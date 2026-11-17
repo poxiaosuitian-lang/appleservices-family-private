@@ -17,7 +17,7 @@ import (
 
 func TestSyncProfilesPersistSelectAndProtectSecrets(t *testing.T) {
 	s := &Server{config: Config{Dir: t.TempDir()}}
-	token := strings.Repeat("fixture-secret-", 4)
+	token := "s1xKey"
 	first, err := s.changeSyncProfiles(syncProfileInput{Operation: "save", URL: "https://one.example.test/", Token: token})
 	if err != nil {
 		t.Fatal(err)

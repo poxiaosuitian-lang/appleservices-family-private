@@ -86,7 +86,7 @@ func (c *RecoveryClient) call(ctx context.Context, base, token, operation string
 	if err != nil {
 		return err
 	}
-	if len(token) < 32 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
+	if len(token) < 6 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
 		return errors.New("同步密钥无效")
 	}
 	body, err := json.Marshal(input)

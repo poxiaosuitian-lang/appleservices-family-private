@@ -122,8 +122,8 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 		if token == "" && index >= 0 && value.Profiles[index].URL == address {
 			token = value.Profiles[index].Token
 		}
-		if len(token) < 32 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
-			return value, errors.New("请填写至少 32 位的同步密钥；更换地址时需重新填写")
+		if len(token) < 6 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
+			return value, errors.New("请填写至少 6 位的同步密钥；更换地址时需重新填写")
 		}
 		if index < 0 {
 			if len(value.Profiles) >= 50 {

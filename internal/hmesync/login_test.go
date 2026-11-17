@@ -17,7 +17,7 @@ func TestServerLoginOrchestration(t *testing.T) {
 			generated := 0
 			challenge := strings.Repeat("a", 64)
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != LoginPath || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 32) {
+				if r.URL.Path != LoginPath || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("k", 6) {
 					t.Error("wrong endpoint or credential")
 				}
 				var input loginRequest
@@ -78,7 +78,7 @@ func TestServerLoginOrchestration(t *testing.T) {
 			if mode == "manual-verify" {
 				code, nonce = "123456", challenge
 			}
-			result, err := loginWithClient(context.Background(), server.Client(), server.URL, strings.Repeat("k", 32), "owner@example.test", "synthetic-password", code, nonce, provider)
+			result, err := loginWithClient(context.Background(), server.Client(), server.URL, strings.Repeat("k", 6), "owner@example.test", "synthetic-password", code, nonce, provider)
 			switch mode {
 			case "old-server", "redirect", "rejected", "bad-source":
 				if err == nil || strings.Contains(err.Error(), "synthetic-password") || len(calls) != 1 || generated != 0 {

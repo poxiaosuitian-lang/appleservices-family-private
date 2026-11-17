@@ -57,8 +57,8 @@ func importWithClient(ctx context.Context, base, token string, payload Payload, 
 	if err != nil {
 		return "", err
 	}
-	if len(token) < 32 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
-		return "", errors.New("同步密钥至少 32 位且不能包含空白")
+	if len(token) < 6 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
+		return "", errors.New("同步密钥至少 6 位且不能包含空白")
 	}
 	if payload.Version != 1 || payload.SourceID != SourceID(payload.AppleID) || payload.AppleID == "" || payload.ICloudEmail == "" || payload.AppPassword == "" || len(payload.Cookies) == 0 {
 		return "", errors.New("账号同步资料不完整")
