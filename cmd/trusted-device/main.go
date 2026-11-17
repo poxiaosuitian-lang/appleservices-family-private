@@ -792,14 +792,7 @@ func run() (runErr error) {
 			var automaticEligibility func(context.Context) (bool, error)
 			if action == "app-password-auto" {
 				automaticEligibility = func(checkCtx context.Context) (bool, error) {
-					source, ok := active.(interface {
-						StorageInfo(context.Context) (*icloud.StorageInfo, error)
-					})
-					if !ok {
-						return false, errors.New("storage query unavailable")
-					}
-					quota, err := source.StorageInfo(checkCtx)
-					return quota != nil && quota.PaidBytes > 0, err
+					return automaticAppPasswordEligible(checkCtx, *dir, active)
 				}
 			}
 			return appPasswordAction(actionCtx, *dir, appleID, password, manual, store, automaticEligibility, func() (appPasswordPortal, error) {

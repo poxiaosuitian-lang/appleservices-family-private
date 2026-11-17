@@ -51,7 +51,7 @@ const password = 'abcd-efgh-ijkl-mnop';
     await refresh();
     assert(await page.locator('#appPasswordEnsure').isEnabled());
     assert.equal(await page.locator('#appPasswordSummary').innerText(),'应用专用密码：未配置');
-    assert(await page.locator('#serverSyncButton').isDisabled()); // Credentials are still required.
+    assert(await page.locator('#serverSyncButton').isEnabled()); // Submit prepares missing credentials.
     delete view.storage;
     await refresh();
     assert(await page.locator('#appPasswordEnsure').isEnabled()); // No quota query is required.

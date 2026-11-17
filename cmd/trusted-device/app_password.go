@@ -14,6 +14,20 @@ import (
 
 const appPasswordLabel = "icloud-hme"
 
+func automaticAppPasswordEligible(ctx context.Context, dir string, source any) (bool, error) {
+	if requireHMEFamilyMember(dir, time.Now().UTC()) == nil {
+		return true, nil
+	}
+	reader, ok := source.(interface {
+		StorageInfo(context.Context) (*icloud.StorageInfo, error)
+	})
+	if !ok {
+		return false, errors.New("storage query unavailable")
+	}
+	quota, err := reader.StorageInfo(ctx)
+	return err == nil && quota != nil && quota.PaidBytes > 0, err
+}
+
 type appPasswordVault interface {
 	LoadAppPassword(string) (*appPasswordRecord, error)
 	SaveAppPassword(string, *appPasswordRecord) error

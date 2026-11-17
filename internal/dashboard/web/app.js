@@ -739,7 +739,7 @@ function render(view) {
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
   renderAppPassword(view, online);
-  $('serverSyncButton').disabled = busy || !online || !view.control_ready || view.app_password?.state !== 'ready';
+  $('serverSyncButton').disabled = busy || !online || !view.control_ready;
   if ($('serverSyncDialog').open && (serverSyncAccount !== selectedAccount || serverSyncPID !== (status.pid || 0))) $('serverSyncDialog').close();
   const nextVerificationContext = JSON.stringify([selectedAccount, status.pid || 0, status.state || '']);
   if (verificationContext !== nextVerificationContext) {
@@ -1591,6 +1591,15 @@ $('serverSyncForm').addEventListener('submit', async event => {
     const profile = syncImported || await saveSyncProfile();
     if (!profile || !sameSession()) return;
     if (!syncImported) {
+      if (current?.app_password?.state !== 'ready') {
+        syncFeedback('正在配置应用专用密码…');
+        const prepared = await api('action', {action:'app-password-ensure'});
+        if (!sameSession()) return;
+        if (prepared.app_password) current.app_password = prepared.app_password;
+        if (!prepared.ok || prepared.app_password?.state !== 'ready') {
+          throw new Error(prepared.message || '应用专用密码尚未配置，请完成账户验证后重试');
+        }
+      }
       syncFeedback('正在同步 Web 会话和 IMAP…');
       const imported = await api('action', {action:'hme-server-sync',profile_id:profile.id,note:profile.url,label:current?.account || ''});
       if (!sameSession()) return;

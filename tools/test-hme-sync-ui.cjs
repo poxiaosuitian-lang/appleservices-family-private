@@ -4,7 +4,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({headless:true, channel:process.env.BROWSER_CHANNEL || 'msedge'});
   try {
     const page = await browser.newPage(), errors = [], actions = [];
-    let profiles = [], selected = '', nextID = 1, loginCalls = 0, loginMode = 'manual';
+    let profiles = [], selected = '', nextID = 1, loginCalls = 0, loginMode = 'manual', prepareOK = false;
     const view = {selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:0},storage_stale:false};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
@@ -34,6 +34,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       }
       if (url.pathname === '/api/action') {
         const input = request.postDataJSON();
+        if (input.action === 'app-password-ensure') {
+          assert.equal(url.searchParams.get('account'),'fixture');
+          actions.push(input);
+          view.app_password = {state:prepareOK ? 'ready' : 'verification_required'};
+          return route.fulfill({json:{ok:prepareOK,app_password:view.app_password,message:prepareOK ? '已加密保存' : '请完成账户验证'}});
+        }
         assert(['hme-server-sync','hme-server-login','hme-server-login-device'].includes(input.action)); assert.equal(input.profile_id,'1'); assert.equal(input.note,'https://one.example.test');
         assert(!input.code); assert.equal(url.searchParams.get('account'),'fixture');
         assert.equal(await page.locator('#serverSyncToken').inputValue(),''); actions.push(input);
@@ -122,6 +128,26 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('#serverSyncSubmit').click();
     await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
     assert.equal(actions.length,before+3); // Retry authentication only, not the completed import.
+    await page.locator('#serverSyncClose').click();
+    view.app_password = {state:'not_subscribed'};
+    view.family = {member:true,storage_participating:true,storage_bytes:50*1024**3};
+    await page.reload();
+    assert(await page.locator('#serverSyncButton').isEnabled());
+    await page.locator('#serverSyncButton').click();
+    await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
+    const familyStart = actions.length;
+    await page.locator('#serverSyncSubmit').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('请完成账户验证'));
+    assert.deepEqual(actions.slice(familyStart).map(a=>a.action),['app-password-ensure']);
+    assert(await page.locator('#serverSyncDialog').isVisible());
+    prepareOK = true;
+    await page.locator('#serverSyncSubmit').click();
+    await page.waitForFunction(()=>document.getElementById('serverSyncFeedback').textContent.includes('尚未更新'));
+    assert.deepEqual(actions.slice(familyStart).map(a=>a.action),['app-password-ensure','app-password-ensure','hme-server-sync','hme-server-login']);
+    await page.locator('#serverSyncSubmit').click();
+    await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
+    assert.equal(actions.at(-1).action,'hme-server-login');
+    assert.equal(actions.length,familyStart+5); // No repeated password creation or import.
     assert.deepEqual(errors,[]);
     console.log('PASS: unsubscribed account sync, save, reload, switch, key masking, sync by profile ID, changed-host validation deletion, automatic server login and manual OTP continuation');
   } finally { await browser.close(); }
