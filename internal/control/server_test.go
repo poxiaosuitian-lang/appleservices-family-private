@@ -132,3 +132,32 @@ func TestControlAcceptsHMEWebTermsAction(t *testing.T) {
 		t.Fatal("hme-accept-terms action was not delivered")
 	}
 }
+
+func TestControlDispatchesWebRecoveryWithLongTimeout(t *testing.T) {
+	server, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	received := make(chan bool, 1)
+	go func() {
+		select {
+		case command := <-server.Commands:
+			deadline, ok := command.Context.Deadline()
+			received <- command.Action.Action == "hme-server-web-recover" && ok && time.Until(deadline) > 170*time.Second
+			command.Reply <- Result{OK: true}
+		case <-time.After(3 * time.Second):
+			received <- false
+		}
+	}()
+	req, _ := http.NewRequest("POST", server.Record.URL+"/action", bytes.NewBufferString(`{"action":"hme-server-web-recover"}`))
+	req.Header.Set("X-Control-Token", server.Record.Token)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 || !<-received {
+		t.Fatal("web recovery was rejected or timeout too short")
+	}
+}

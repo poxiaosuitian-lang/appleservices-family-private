@@ -693,6 +693,37 @@ func run() (runErr error) {
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+		if action == "hme-server-web-recover" {
+			var payload hmesync.WebRecoveryPayload
+			if json.Unmarshal([]byte(commandLabel), &payload) != nil || payload.SourceID != hmesync.SourceID(appleID) {
+				return control.Result{Stage: "web-recovery-binding", Message: "Cookie 恢复账号绑定无效"}
+			}
+			if _, err := hmesync.Endpoint(commandNote); err != nil {
+				return control.Result{Message: err.Error()}
+			}
+			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
+			defer done()
+			if _, err := loadHME(queryCtx); err != nil {
+				stage := "web-recovery-failed"
+				if errors.Is(err, icloud.ErrHMEAuthenticationRequired) || errors.Is(err, icloud.ErrHMEWebRepairRequired) || errors.Is(err, icloud.ErrHMEVerificationRequired) {
+					stage = "web-verification-required"
+				}
+				return control.Result{Stage: stage, Message: "本机 Web 会话尚未通过验证，请在本机面板检查隐藏邮箱登录"}
+			}
+			cookies, host, err := hmeClient.ExportServerCookies()
+			if err != nil {
+				return control.Result{Stage: "web-recovery-failed", Message: "本机 Web 会话暂不可同步"}
+			}
+			defer clear(cookies)
+			payload.AppleID = appleID
+			payload.Host = host
+			payload.Cookies = cookies
+			result, err := hmesync.RefreshWebSession(queryCtx, commandNote, commandCode, payload)
+			if err != nil {
+				return control.Result{Stage: "web-recovery-failed", Message: err.Error()}
+			}
+			return control.Result{OK: true, Stage: "web-recovered", Message: "服务器 Web 会话已恢复", ServerLogin: result}
+		}
 		if action == "hme-server-login" || action == "hme-server-login-device" {
 			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
 			defer done()

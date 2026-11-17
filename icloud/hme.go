@@ -31,6 +31,7 @@ const (
 
 var (
 	ErrHMEAuthenticationRequired      = errors.New("hide my email web authentication required")
+	ErrHMEVerificationRequired        = errors.New("Apple Web 验证未完成，需要人工处理")
 	ErrHMEWebRepairRequired           = errors.New("Apple 要求先接受当前 iCloud Web 条款")
 	ErrHMEWebRepairSessionUnavailable = errors.New("没有可复用的 iCloud Web repair 会话")
 )
@@ -399,7 +400,7 @@ func (c *HideMyEmailClient) authenticate(ctx context.Context, password string, c
 		code, codeErr := codeProvider(codeCtx)
 		cancel()
 		if codeErr != nil || len(strings.TrimSpace(code)) != 6 {
-			return errors.New("local trusted-device code generation failed")
+			return ErrHMEVerificationRequired
 		}
 		verifyBody, _ := json.Marshal(map[string]any{"securityCode": map[string]string{"code": strings.TrimSpace(code)}})
 		response, verifyData, err := c.authRequest(ctx, state, http.MethodPost, c.authBase+"/verify/trusteddevice/securitycode", verifyBody, c.authHeaders(state))
@@ -408,7 +409,7 @@ func (c *HideMyEmailClient) authenticate(ctx context.Context, password string, c
 		}
 		code = ""
 		if err != nil || !((response.StatusCode >= 200 && response.StatusCode < 300) || (response.StatusCode == http.StatusConflict && state.sessionToken != "" && bytes.Contains(verifyData, []byte(`"valid":true`)))) {
-			return errors.New("Apple rejected the trusted-device verification code")
+			return ErrHMEVerificationRequired
 		}
 	} else if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if c.serviceName == "mccgateway" {

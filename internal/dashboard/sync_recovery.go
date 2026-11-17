@@ -58,6 +58,7 @@ func (s *Server) serveSyncRecovery(w http.ResponseWriter, r *http.Request) {
 		if input.Enabled {
 			p.RecoverySources[account.ID] = hmesync.SourceID(account.AppleID)
 			delete(p.RecoveryHandled, hmesync.SourceID(account.AppleID))
+			delete(p.RecoveryHandled, hmesync.SourceID(account.AppleID)+":web")
 		} else {
 			delete(p.RecoverySources, account.ID)
 		}
@@ -252,14 +253,20 @@ func (s *Server) handleRecoveryJob(ctx context.Context, p syncProfile, job hmesy
 	actionCtx, cancel := context.WithTimeout(ctx, 185*time.Second)
 	defer cancel()
 	var result control.Result
-	if s.callFor(actionCtx, account.Dir, "/action", control.Action{Action: "hme-server-login", Note: p.URL, Code: p.Token}, &result) != nil {
+	action := control.Action{Action: "hme-server-login", Note: p.URL, Code: p.Token}
+	if job.Kind == "web_session" {
+		metadata, _ := json.Marshal(hmesync.WebRecoveryPayload{Version: 1, ClientID: p.ID, JobID: job.ID, Lease: job.Lease, SourceID: job.SourceID})
+		action.Action = "hme-server-web-recover"
+		action.Label = string(metadata)
+	}
+	if s.callFor(actionCtx, account.Dir, "/action", action, &result) != nil {
 		return "failed"
 	}
 	if result.OK && result.ServerLogin != nil && result.ServerLogin.State == "ready" && result.ServerLogin.SourceID == job.SourceID {
 		outcome = "ready"
 		return outcome
 	}
-	if result.ServerLogin != nil && result.ServerLogin.State == "otp_required" {
+	if result.Stage == "web-verification-required" || result.ServerLogin != nil && result.ServerLogin.State == "otp_required" {
 		outcome = "verification_required"
 		return outcome
 	}
@@ -290,7 +297,8 @@ func (s *Server) reserveRecovery(p syncProfile, job hmesync.RecoveryJob) (string
 		if current.RecoveryHandled == nil {
 			current.RecoveryHandled = map[string]recoveryAttempt{}
 		}
-		previous := current.RecoveryHandled[job.SourceID]
+		key := recoveryAttemptKey(job)
+		previous := current.RecoveryHandled[key]
 		if previous.JobID == job.ID {
 			return previous.Outcome, false
 		}
@@ -300,7 +308,7 @@ func (s *Server) reserveRecovery(p syncProfile, job hmesync.RecoveryJob) (string
 		if time.Now().Before(previous.NextAllowed) {
 			return "local_unavailable", false
 		}
-		current.RecoveryHandled[job.SourceID] = recoveryAttempt{job.ID, "failed", time.Now().Add(5 * time.Minute)}
+		current.RecoveryHandled[key] = recoveryAttempt{job.ID, "failed", time.Now().Add(5 * time.Minute)}
 		if s.writeSyncProfiles(cfg) != nil {
 			return "failed", false
 		}
@@ -320,15 +328,23 @@ func (s *Server) finishRecovery(p syncProfile, job hmesync.RecoveryJob, outcome 
 		if current.ID != p.ID || current.URL != p.URL || current.Token != p.Token {
 			continue
 		}
-		attempt := current.RecoveryHandled[job.SourceID]
+		key := recoveryAttemptKey(job)
+		attempt := current.RecoveryHandled[key]
 		if attempt.JobID != job.ID {
 			return
 		}
 		attempt.Outcome = outcome
-		current.RecoveryHandled[job.SourceID] = attempt
+		current.RecoveryHandled[key] = attempt
 		if s.writeSyncProfiles(cfg) != nil {
 			s.setRecoveryStatus(p.ID, "failed", "恢复结果保存失败，请检查本机配置")
 		}
 		return
 	}
+}
+
+func recoveryAttemptKey(job hmesync.RecoveryJob) string {
+	if job.Kind == "web_session" {
+		return job.SourceID + ":web"
+	}
+	return job.SourceID
 }

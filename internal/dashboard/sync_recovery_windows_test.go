@@ -99,7 +99,7 @@ func TestRecoveryOptInIdentityAndPersistence(t *testing.T) {
 }
 
 func TestRecoveryJobCallsOnlyBoundWorkerAndDeduplicates(t *testing.T) {
-	for _, state := range []string{"ready", "otp_required", "wrong_identity"} {
+	for _, state := range []string{"ready", "otp_required", "wrong_identity", "web_ready"} {
 		t.Run(state, func(t *testing.T) {
 			dir := t.TempDir()
 			executable, _ := os.Executable()
@@ -124,10 +124,23 @@ func TestRecoveryJobCallsOnlyBoundWorkerAndDeduplicates(t *testing.T) {
 			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				var action control.Action
-				if r.URL.Path != "/action" || json.NewDecoder(r.Body).Decode(&action) != nil || action.Action != "hme-server-login" || action.Note != p.URL || action.Code != p.Token || action.Label != "" {
+				wantAction := "hme-server-login"
+				if state == "web_ready" {
+					wantAction = "hme-server-web-recover"
+				}
+				if r.URL.Path != "/action" || json.NewDecoder(r.Body).Decode(&action) != nil || action.Action != wantAction || action.Note != p.URL || action.Code != p.Token {
 					t.Error("unexpected worker action")
 				}
+				if state == "web_ready" {
+					var payload hmesync.WebRecoveryPayload
+					if json.Unmarshal([]byte(action.Label), &payload) != nil || payload.SourceID != source || payload.ClientID != p.ID || payload.JobID != "job1" {
+						t.Error("web task lost its lease binding")
+					}
+				}
 				result := &hmesync.LoginResult{State: state, SourceID: source}
+				if state == "web_ready" {
+					result.State = "ready"
+				}
 				if state == "wrong_identity" {
 					result.State = "ready"
 					result.SourceID = "other"
@@ -145,6 +158,9 @@ func TestRecoveryJobCallsOnlyBoundWorkerAndDeduplicates(t *testing.T) {
 				}
 			}
 			job := hmesync.RecoveryJob{ID: "job1", SourceID: source}
+			if state == "web_ready" {
+				job.Kind = "web_session"
+			}
 			foreign := job
 			foreign.SourceID = "other"
 			if s.handleRecoveryJob(context.Background(), p, foreign) != "local_unavailable" || calls.Load() != 0 {

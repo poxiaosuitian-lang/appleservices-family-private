@@ -197,6 +197,9 @@ func (s *Server) serveSyncProfiles(w http.ResponseWriter, r *http.Request) {
 			if attempt := p.RecoveryHandled[hmesync.SourceID(a.AppleID)]; attempt.Outcome == "verification_required" {
 				item.RecoveryStatus = &recoveryStatus{State: "verification_required", Message: "Apple 要求人工验证，请在此窗口完成验证"}
 			}
+			if attempt := p.RecoveryHandled[hmesync.SourceID(a.AppleID)+":web"]; attempt.Outcome == "verification_required" {
+				item.RecoveryStatus = &recoveryStatus{State: "verification_required", Message: "Web 会话需要验证，请先在本机读取隐藏邮箱，再重新开启按需恢复"}
+			}
 		}
 		public = append(public, item)
 	}

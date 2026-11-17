@@ -21,6 +21,7 @@ type RecoveryJob struct {
 	Kind     string `json:"kind"`
 }
 type RecoveryRequest struct {
+	Kinds    []string `json:"kinds,omitempty"`
 	Version  int      `json:"version"`
 	ClientID string   `json:"client_id"`
 	Sources  []string `json:"sources,omitempty"`
@@ -41,7 +42,7 @@ func (c *RecoveryClient) Wait(ctx context.Context, base, token, clientID string,
 			Job *RecoveryJob `json:"job"`
 		} `json:"data"`
 	}
-	if err := c.call(ctx, base, token, "wait", RecoveryRequest{Version: 1, ClientID: clientID, Sources: sources}, &result); err != nil {
+	if err := c.call(ctx, base, token, "wait", RecoveryRequest{Version: 1, ClientID: clientID, Sources: sources, Kinds: []string{"apple_login", "web_session"}}, &result); err != nil {
 		return nil, err
 	}
 	if !result.Success {
@@ -58,7 +59,7 @@ func (c *RecoveryClient) Wait(ctx context.Context, base, token, clientID string,
 			break
 		}
 	}
-	if !allowed || job.Kind != "apple_login" || !regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(job.ID) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(job.Lease) {
+	if !allowed || (job.Kind != "apple_login" && job.Kind != "web_session") || !regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(job.ID) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(job.Lease) {
 		return nil, errors.New("服务器返回了不匹配的登录恢复任务")
 	}
 	return job, nil
@@ -80,7 +81,7 @@ func (c *RecoveryClient) Complete(ctx context.Context, base, token, clientID str
 	}
 	return nil
 }
-func (c *RecoveryClient) call(ctx context.Context, base, token, operation string, input RecoveryRequest, output any) error {
+func (c *RecoveryClient) call(ctx context.Context, base, token, operation string, input any, output any) error {
 	endpoint, err := Endpoint(base)
 	if err != nil {
 		return err

@@ -10,7 +10,7 @@ import (
 )
 
 func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
-	for _, mode := range []string{"idle", "job", "wrong-account", "wrong-kind", "bad-lease", "redirect", "unsupported"} {
+	for _, mode := range []string{"idle", "job", "web", "wrong-account", "wrong-kind", "bad-lease", "redirect", "unsupported"} {
 		t.Run(mode, func(t *testing.T) {
 			source := SourceID("owner@example.test")
 			calls := 0
@@ -40,6 +40,8 @@ func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
 					job = &RecoveryJob{ID: "job_fixture", SourceID: source, Kind: "apple_login", Lease: strings.Repeat("a", 64)}
 				}
 				switch mode {
+				case "web":
+					job.Kind = "web_session"
 				case "wrong-account":
 					job.SourceID = SourceID("other@example.test")
 				case "wrong-kind":
@@ -57,7 +59,7 @@ func TestRecoveryWaitOnlyReturnsBoundJobs(t *testing.T) {
 				if err != nil || job != nil {
 					t.Fatal("idle queue triggered work")
 				}
-			} else if mode == "job" {
+			} else if mode == "job" || mode == "web" {
 				if err != nil || job == nil {
 					t.Fatal("valid job rejected")
 				}

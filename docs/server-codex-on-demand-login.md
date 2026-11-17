@@ -8,7 +8,7 @@ Windows 项目已经实现任务接收端：`internal/hmesync/recovery.go` 和 `
 
 遇到 `APPLE_ACCOUNT_LOGIN_REQUIRED`（产品称 `login_required`）才创建恢复任务。客户端收到任务后沿用现有 `apple-login` status/login/verify_device 流程，使用本机加密密码和 Mac 验证码；主密码不由任务接口读取/返回，不允许服务器直接调用 Windows localhost，也不要把本机端口暴露公网。
 
-不要把本说明误当已实现的服务器功能：下面两个新路由及任务队列需要你实现并部署。保留已有 `verify_device` 和 `device_code_supported`。
+服务器已实现以下路由及队列；Web Cookie 恢复扩展见 `web-cookie-recovery.md`。保留已有 `verify_device` 和 `device_code_supported`。
 
 ## 精确协议
 
