@@ -189,7 +189,7 @@ func (s *Server) serveSyncProfiles(w http.ResponseWriter, r *http.Request) {
 		if a := s.lookup(r.URL.Query().Get("account")); a != nil {
 			item.RecoveryEnabled = p.RecoverySources[a.ID] == hmesync.SourceID(a.AppleID)
 		}
-		if status, ok := s.recoveryStatus.Load(p.ID); ok {
+		if status, ok := s.recoveryStatus.Load(p.ID); ok && item.RecoveryEnabled {
 			value := status.(recoveryStatus)
 			item.RecoveryStatus = &value
 		}

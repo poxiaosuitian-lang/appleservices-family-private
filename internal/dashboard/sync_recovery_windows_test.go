@@ -200,3 +200,36 @@ func TestRecoveryCanceledAndNoProfilesNeverContactsWorker(t *testing.T) {
 		t.Fatal("cancellation ignored")
 	}
 }
+
+func TestRecoveryStatusDoesNotLeakAcrossDisabledAccounts(t *testing.T) {
+	s, err := New(Config{Dir: t.TempDir(), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.listener.Close()
+	s.accounts = []*Account{{ID: "enabled", AppleID: "one@example.test"}, {ID: "disabled", AppleID: "two@example.test"}}
+	cfg, err := s.changeSyncProfiles(syncProfileInput{Operation: "save", URL: "https://fixture.example.test", Token: strings.Repeat("k", 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Profiles[0].RecoverySources = map[string]string{"enabled": hmesync.SourceID("one@example.test")}
+	if err = s.writeSyncProfiles(cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.setRecoveryStatus(cfg.Profiles[0].ID, "listening", "waiting")
+	for _, id := range []string{"enabled", "disabled"} {
+		r := httptest.NewRequest("GET", s.URL()+"/api/sync-profiles?account="+id, nil)
+		r.Header.Set("X-App-Token", s.token)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var out struct {
+			Profiles []syncProfilePublic `json:"profiles"`
+		}
+		if json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Profiles) != 1 {
+			t.Fatal("invalid profile response")
+		}
+		if (out.Profiles[0].RecoveryStatus != nil) != (id == "enabled") {
+			t.Fatal("another account's listener was shown for disabled account")
+		}
+	}
+}
