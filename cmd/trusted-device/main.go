@@ -669,10 +669,9 @@ func run() (runErr error) {
 	var accountManagementClient *icloud.AppleAccountClient
 	pendingHMECandidate := ""
 	pendingReachableEmail := ""
-	loadHME := func(actionCtx context.Context) (*icloud.HideMyEmailInfo, error) {
-		if err := requireHMEAccess(actionCtx, *dir, active); err != nil {
-			return nil, err
-		}
+	// Reading and exporting a verified session is independent of the local
+	// subscription gate used for Hide My Email feature operations.
+	loadSyncHME := func(actionCtx context.Context) (*icloud.HideMyEmailInfo, error) {
 		if hmeClient == nil {
 			var clientErr error
 			hmeClient, clientErr = icloud.NewHideMyEmailClient(*dir, appleID)
@@ -681,14 +680,13 @@ func run() (runErr error) {
 			}
 			hmeClient.SetSecurityQuestionsProvider(securityAnswers)
 		}
-		info, err := hmeClient.List(actionCtx)
-		if !errors.Is(err, icloud.ErrHMEAuthenticationRequired) {
-			return info, err
-		}
-		if err := hmeClient.Authenticate(actionCtx, password, generateCode); err != nil {
+		return loadSyncHMESession(actionCtx, hmeClient, password, generateCode)
+	}
+	loadHME := func(actionCtx context.Context) (*icloud.HideMyEmailInfo, error) {
+		if err := requireHMEAccess(actionCtx, *dir, active); err != nil {
 			return nil, err
 		}
-		return hmeClient.List(actionCtx)
+		return loadSyncHME(actionCtx)
 	}
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
@@ -703,12 +701,12 @@ func run() (runErr error) {
 			}
 			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
 			defer done()
-			if _, err := loadHME(queryCtx); err != nil {
+			if _, err := loadSyncHME(queryCtx); err != nil {
 				stage := "web-recovery-failed"
 				if errors.Is(err, icloud.ErrHMEAuthenticationRequired) || errors.Is(err, icloud.ErrHMEWebRepairRequired) || errors.Is(err, icloud.ErrHMEVerificationRequired) {
 					stage = "web-verification-required"
 				}
-				return control.Result{Stage: stage, Message: "本机 Web 会话尚未通过验证，请在本机面板检查隐藏邮箱登录"}
+				return control.Result{Stage: stage, Message: "本机 iCloud 网页会话尚未通过验证，请重新连接账号后重试"}
 			}
 			cookies, host, err := hmeClient.ExportServerCookies()
 			if err != nil {
@@ -754,16 +752,13 @@ func run() (runErr error) {
 			}
 			queryCtx, done := context.WithTimeout(actionCtx, 170*time.Second)
 			defer done()
-			info, err := loadHME(queryCtx)
+			info, err := loadSyncHME(queryCtx)
 			if err != nil {
-				return control.Result{Message: "隐藏邮箱会话未通过核验，请先读取隐藏邮箱", Stage: "hme-server-sync"}
+				return control.Result{Message: "iCloud 网页会话未通过核验，请重新连接账号后重试", Stage: "hme-server-sync"}
 			}
-			mailbox := ownICloudForwardTarget(info)
-			if mailbox == "" {
-				return control.Result{Message: "无法唯一确定本账号的 iCloud 邮箱，请先设置隐私邮箱转发", Stage: "hme-server-sync"}
-			}
-			if !hmeForwardMatches(info, mailbox) {
-				return control.Result{Message: "请先将隐私邮箱转发到本账号的 iCloud 邮箱", Stage: "hme-server-sync"}
+			mailbox, err := serverSyncMailbox(info)
+			if err != nil {
+				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}
 			}
 			record, err := store.LoadAppPassword(appleID)
 			if err != nil || record == nil {
@@ -786,7 +781,7 @@ func run() (runErr error) {
 			}
 			return control.Result{OK: true, Message: "服务器已导入账号，隐藏邮箱和 IMAP 均已验证 · " + id, Stage: "hme-server-sync"}
 		}
-		if action == "app-password-ensure" || action == "app-password-save" {
+		if action == "app-password-ensure" || action == "app-password-save" || action == "app-password-auto" {
 			manual := ""
 			if action == "app-password-save" {
 				manual = strings.TrimSpace(commandCode)
@@ -794,16 +789,20 @@ func run() (runErr error) {
 					return control.Result{Message: "请输入应用专用密码", Stage: "app-password-format"}
 				}
 			}
-			return appPasswordAction(actionCtx, *dir, appleID, password, manual, store, func(checkCtx context.Context) (bool, error) {
-				source, ok := active.(interface {
-					StorageInfo(context.Context) (*icloud.StorageInfo, error)
-				})
-				if !ok {
-					return false, errors.New("storage query unavailable")
+			var automaticEligibility func(context.Context) (bool, error)
+			if action == "app-password-auto" {
+				automaticEligibility = func(checkCtx context.Context) (bool, error) {
+					source, ok := active.(interface {
+						StorageInfo(context.Context) (*icloud.StorageInfo, error)
+					})
+					if !ok {
+						return false, errors.New("storage query unavailable")
+					}
+					quota, err := source.StorageInfo(checkCtx)
+					return quota != nil && quota.PaidBytes > 0, err
 				}
-				quota, err := source.StorageInfo(checkCtx)
-				return quota != nil && quota.PaidBytes > 0, err
-			}, func() (appPasswordPortal, error) {
+			}
+			return appPasswordAction(actionCtx, *dir, appleID, password, manual, store, automaticEligibility, func() (appPasswordPortal, error) {
 				portal, err := icloud.NewAppleAccountClientWithStore(*dir, appleID)
 				if err == nil {
 					portal.SetSecurityQuestionsProvider(securityAnswers)
@@ -1596,7 +1595,7 @@ func run() (runErr error) {
 	for {
 		select {
 		case <-autoAppPassword:
-			performAction(ctx, "app-password-ensure", "", "", "", "", nil)
+			performAction(ctx, "app-password-auto", "", "", "", "", nil)
 		case <-autoHMEForward:
 			// Run after replying to the verified purchase, so web authentication
 			// cannot turn a completed subscription into an HTTP timeout.

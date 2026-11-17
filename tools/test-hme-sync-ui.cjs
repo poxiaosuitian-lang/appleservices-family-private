@@ -5,7 +5,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   try {
     const page = await browser.newPage(), errors = [], actions = [];
     let profiles = [], selected = '', nextID = 1, loginCalls = 0, loginMode = 'manual';
-    const view = {selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:53687091200},storage_stale:false};
+    const view = {selected:'fixture',account:'Fixture',login_account:'owner@example.test',accounts:[],status:{running:true,authenticated:true,state:'online',pid:1},control_ready:true,icloud_activated:true,app_password:{state:'ready'},storage:{paid_bytes:0},storage_stale:false};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
@@ -53,6 +53,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       return route.fulfill({contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(__dirname,'../internal/dashboard/web',file),'utf8')});
     });
     await page.goto('http://fixture.test/#icloud');
+    await page.waitForFunction(() => current?.selected === 'fixture');
+    assert(await page.locator('#serverSyncButton').isEnabled());
+    assert(await page.locator('#hmeCard').isHidden());
     await page.locator('#serverSyncButton').click();
     await page.locator('#serverSyncURL').fill('https://one.example.test');
     await page.locator('#serverSyncToken').fill('k'.repeat(32));
@@ -120,6 +123,6 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(()=>!document.getElementById('serverSyncSubmit').disabled);
     assert.equal(actions.length,before+3); // Retry authentication only, not the completed import.
     assert.deepEqual(errors,[]);
-    console.log('PASS: save, reload, switch, key masking, sync by profile ID, changed-host validation deletion, automatic server login and manual OTP continuation');
+    console.log('PASS: unsubscribed account sync, save, reload, switch, key masking, sync by profile ID, changed-host validation deletion, automatic server login and manual OTP continuation');
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1});

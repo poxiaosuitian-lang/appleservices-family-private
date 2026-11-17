@@ -49,8 +49,12 @@ const password = 'abcd-efgh-ijkl-mnop';
     view.storage.paid_bytes = 0;
     view.app_password = {state:'not_subscribed'};
     await refresh();
-    assert(await page.locator('#appPasswordEnsure').isDisabled());
-    view.storage.paid_bytes = 50*GiB;
+    assert(await page.locator('#appPasswordEnsure').isEnabled());
+    assert.equal(await page.locator('#appPasswordSummary').innerText(),'应用专用密码：未配置');
+    assert(await page.locator('#serverSyncButton').isDisabled()); // Credentials are still required.
+    delete view.storage;
+    await refresh();
+    assert(await page.locator('#appPasswordEnsure').isEnabled()); // No quota query is required.
     view.app_password = {state:'pending'};
     await refresh();
     assert(await page.locator('#appPasswordEnsure').isDisabled());
@@ -74,11 +78,13 @@ const password = 'abcd-efgh-ijkl-mnop';
     assert.equal(await page.locator('#appPasswordInput').inputValue(),'');
     assert(await page.locator('#appPasswordEnsure').isHidden());
     assert(await page.locator('#appPasswordForm').isHidden());
+    assert(await page.locator('#serverSyncButton').isEnabled());
     assert.equal(await page.evaluate(value => JSON.stringify(localStorage).includes(value) || JSON.stringify(sessionStorage).includes(value) || document.body.textContent.includes(value),password),false);
     view.status = {running:false,authenticated:false,state:'stopped'};
     view.control_ready = false;
     await refresh();
     assert.equal(await page.locator('#appPasswordSummary').innerText(),'应用专用密码：已加密保存');
+    assert(await page.locator('#serverSyncButton').isDisabled());
     assert.deepEqual(calls,['app-password-ensure','app-password-save']);
 
     view.status = {running:true,authenticated:true,state:'online',pid:124};

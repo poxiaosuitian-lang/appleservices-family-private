@@ -27,7 +27,9 @@ type appPasswordPortal interface {
 	CreateAppSpecificPassword(context.Context, string, string) (*icloud.AppSpecificPassword, error)
 }
 
-func appPasswordAction(ctx context.Context, dir, appleID, password, manual string, vault appPasswordVault, paid func(context.Context) (bool, error), portal func() (appPasswordPortal, error), code func(context.Context) (string, error)) control.Result {
+// automaticEligibility limits unsolicited background provisioning only. Explicit
+// configuration passes nil: an app password does not require a subscription.
+func appPasswordAction(ctx context.Context, dir, appleID, password, manual string, vault appPasswordVault, automaticEligibility func(context.Context) (bool, error), portal func() (appPasswordPortal, error), code func(context.Context) (string, error)) control.Result {
 	preserveUncertain := false
 	finish := func(state, message string) control.Result {
 		if preserveUncertain && state != "ready" {
@@ -61,12 +63,14 @@ func appPasswordAction(ctx context.Context, dir, appleID, password, manual strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, 165*time.Second)
 	defer cancel()
-	eligible, err := paid(ctx)
-	if err != nil {
-		return finish("failed", "未能核验 iCloud+ 订阅，尚未生成应用专用密码")
-	}
-	if !eligible {
-		return finish("not_subscribed", "开通 iCloud+ 后配置应用专用密码")
+	if automaticEligibility != nil {
+		eligible, err := automaticEligibility(ctx)
+		if err != nil {
+			return finish("failed", "自动配置条件未能核验，可手动配置应用专用密码")
+		}
+		if !eligible {
+			return finish("not_subscribed", "应用专用密码尚未配置")
+		}
 	}
 	if vault.CheckAppPasswordStorage(appleID) != nil {
 		return finish("failed", "本机加密存储不可用，未生成应用专用密码")

@@ -678,13 +678,13 @@ function hasPaidStorage(view) { return !!view?.storage && !view.storage_stale &&
 function renderAppPassword(view, online) {
   const info = view?.app_password, state = info?.state || '', pid = view?.status?.pid || 0;
   const manual = ['verification_required', 'unknown', 'failed'].includes(state);
-  const available = !!view && online && view.control_ready && hasPaidStorage(view) && state !== 'pending';
+  const available = !!view && online && view.control_ready && state !== 'pending';
   const input = $('appPasswordInput');
   if (appPasswordOwner !== selectedAccount || appPasswordPID !== pid || !online || !manual) input.value = '';
   appPasswordOwner = selectedAccount;
   appPasswordPID = pid;
-  const labels = {ready: '已加密保存', pending: '正在配置…', verification_required: '需要 Apple 验证', unknown: '结果待确认', failed: '配置未完成', not_subscribed: '订阅后自动配置'};
-  $('appPasswordSummary').textContent = '应用专用密码：' + (labels[state] || (hasPaidStorage(view) ? '未配置' : '订阅后自动配置'));
+  const labels = {ready: '已加密保存', pending: '正在配置…', verification_required: '需要 Apple 验证', unknown: '结果待确认', failed: '配置未完成', not_subscribed: '未配置'};
+  $('appPasswordSummary').textContent = '应用专用密码：' + (labels[state] || '未配置');
   $('appPasswordEnsure').hidden = state === 'ready';
   $('appPasswordEnsure').disabled = busy || !available;
   $('appPasswordMessage').textContent = manual ? (info.message || '请在 Apple 账户页面完成验证并生成应用专用密码，再加密保存。') : '';
@@ -1021,7 +1021,7 @@ function purchaseOutcomeMessage(result) {
 
 async function action(name, extra = {}, options = {}) {
   if (busy) return;
-  if (name.startsWith('hme-') && familyStale && !(hasPaidStorage(current) && !current?.storage_stale)) {
+  if (name.startsWith('hme-') && !name.startsWith('hme-server-') && familyStale && !(hasPaidStorage(current) && !current?.storage_stale)) {
     try {
       busy = true; document.body.classList.add('busy'); if (current) render(current);
       const refreshed = await api('action', { action: 'family-info' });

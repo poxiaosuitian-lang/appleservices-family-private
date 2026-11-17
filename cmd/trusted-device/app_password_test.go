@@ -161,6 +161,32 @@ func TestAppPasswordManualSaveResolvesPendingWithoutRemoteCreation(t *testing.T)
 	}
 }
 
+func TestAppPasswordExplicitConfigurationWithoutSubscription(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		t.Run(map[bool]string{false: "create", true: "save"}[manual], func(t *testing.T) {
+			dir := t.TempDir()
+			vault, portal := &fakeAppVault{}, &fakeAppPortal{}
+			// A previous automatic attempt must not prevent explicit configuration.
+			if err := apppassword.Save(dir, "owner@example.test", &apppassword.Status{State: "not_subscribed"}); err != nil {
+				t.Fatal(err)
+			}
+			input := ""
+			if manual {
+				input = testAppSecret
+			}
+			result := appPasswordAction(context.Background(), dir, "owner@example.test", "primary-secret", input, vault, nil, func() (appPasswordPortal, error) {
+				if manual {
+					t.Fatal("manual configuration must not contact Apple")
+				}
+				return portal, nil
+			}, nil)
+			if !result.OK || result.AppPassword.State != "ready" || vault.writes != 1 || vault.record.Password != testAppSecret {
+				t.Fatalf("explicit configuration failed: %+v", result)
+			}
+		})
+	}
+}
+
 func TestAppPasswordFailedManualSavePreservesUncertainGeneration(t *testing.T) {
 	for _, mode := range []string{"unpaid", "probe", "save", "quota"} {
 		t.Run(mode, func(t *testing.T) {
