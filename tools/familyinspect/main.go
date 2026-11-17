@@ -588,6 +588,10 @@ func run() error {
 		if err != nil {
 			return nil, err
 		}
+		legacyDetails := u.Path == "/setup/family/getFamilyDetails"
+		if legacyDetails {
+			fresno = false
+		}
 		var body []byte
 		if fresno {
 			accountDetails := map[string]any{
@@ -602,6 +606,11 @@ func run() error {
 			}
 		}
 		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+		if legacyDetails {
+			request.Method = http.MethodGet
+			request.Body = nil
+			request.ContentLength = 0
+		}
 		for key, value := range headers {
 			request.Header.Set(key, value)
 		}
@@ -968,46 +977,23 @@ func run() error {
 			return errors.New("cannot preserve private family response")
 		}
 	}
-	details, err := decodeObject(detailsData)
+	details, usedLegacy, err := compatibleFamilyDetails(detailsData, accepted.Session.DSID, func() ([]byte, error) {
+		request, err := newFamilyRequest(legacyFamilyDetailsURL, false)
+		if err != nil {
+			return nil, err
+		}
+		response, err := apiClient.Do(request)
+		if err != nil {
+			return nil, errors.New("家庭状态兼容查询连接失败")
+		}
+		return readLimited(response)
+	})
 	if err != nil {
-		if *createFamily {
-			return errors.New("family was created but post-action family details are unavailable")
-		}
-		eligibilityRaw := stringValue(urls["checkFamilyEligibility"])
-		if eligibilityRaw == "" {
-			return errors.New("family details unavailable and eligibility endpoint missing")
-		}
-		eligibilityRequest, requestErr := newFamilyRequest(eligibilityRaw, false)
-		if requestErr != nil {
-			return requestErr
-		}
-		eligibilityResponse, requestErr := client.Do(eligibilityRequest)
-		if requestErr != nil {
-			return fmt.Errorf("family eligibility transport failed: %w", requestErr)
-		}
-		eligibilityData, requestErr := readLimited(eligibilityResponse)
-		if requestErr != nil {
-			return requestErr
-		}
-		eligibility, decodeErr := decodeObject(eligibilityData)
-		if decodeErr != nil {
-			return errors.New("family details and eligibility returned Apple UI errors")
-		}
-		keys := make([]string, 0, len(eligibility))
-		for key := range eligibility {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		eligible, hasEligible := eligibility["eligible"].(bool)
-		message := stringValue(eligibility["status-message"])
-		if len(message) > 160 {
-			message = message[:160]
-		}
-		fmt.Printf("family details unavailable; eligibility accepted; eligible-present=%t eligible=%t status-message=%q response-keys=%s; mutation-submitted=false\n", hasEligible, eligible, message, strings.Join(keys, ","))
-		return nil
-	}
-	if err := validateFamilyDetails(details); err != nil {
 		return err
+	}
+	if usedLegacy {
+		detailsURL, _ = appleEndpoint(legacyFamilyDetailsURL)
+		fmt.Println("family membership confirmed through account-bound compatibility read")
 	}
 	eligible, eligibilityKnown := false, false
 	if !boolValue(details["is-member-of-family"]) {

@@ -73,3 +73,19 @@ func TestRequireHMEFamilyMemberRejectsOrganizerAndStaleCache(t *testing.T) {
 		t.Fatal("stale family cache was accepted")
 	}
 }
+
+func TestHMEFamilyMemberAcceptsCurrentDashboardCacheVersion(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	member := control.FamilyInfo{Member: true, Organizers: 1, Self: 1, StorageKnown: true, StorageParticipating: true, StorageAvailable: true, StorageEnabled: true, StorageBytes: 50 << 30}
+	for _, version := range []int{1, 2, 3} {
+		data, _ := json.Marshal(hmeFamilyCache{Version: version, AccountID: filepath.Base(dir), CheckedAt: now, Family: member})
+		if err := os.WriteFile(filepath.Join(dir, "family-status.json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		err := requireHMEFamilyMember(dir, now)
+		if (err == nil) != (version == 1 || version == 2) {
+			t.Fatal("family cache compatibility mismatch", version, err)
+		}
+	}
+}
