@@ -7,6 +7,7 @@ let purchaseFlowRunning = false;
 let verificationContext = '';
 let appPasswordOwner = '', appPasswordPID = 0;
 let serverSyncAccount = '', serverSyncPID = 0;
+let loginSubmitting = false, accountsRenderKey = '', devicesRenderKey = '';
 
 const themeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
 let themePref = localStorage.getItem('appleservices:theme') || 'light';
@@ -69,13 +70,14 @@ const time = value => {
   if (!value || value.startsWith('0001')) return '—';
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Singapore', hour12: false }).format(new Date(value));
 };
-async function api(path, data) {
+async function api(path, data, { signal } = {}) {
   const suffix = path === 'view' && !selectedAccount ? '' : (selectedAccount ? '?account=' + encodeURIComponent(selectedAccount) : '');
   const response = await fetch('/api/' + path + suffix, {
     method: data === undefined ? 'GET' : 'POST',
     headers: { 'X-App-Token': token, 'Content-Type': 'application/json' },
     body: data === undefined ? undefined : JSON.stringify(data),
-    cache: 'no-store'
+    cache: 'no-store',
+    signal
   });
   if (!response.ok) {
     if ((path === 'sync-profiles' || path === 'sync-recovery') && response.status === 400) {
@@ -172,6 +174,9 @@ function deviceIcon(device) {
 }
 
 function renderDevices(devices, status = current?.status || {}) {
+  const key = JSON.stringify([selectedAccount, devices || [], devices?.length ? null : [status.state, status.running]]);
+  if (key === devicesRenderKey) return;
+  devicesRenderKey = key;
   const grid = $('deviceGrid');
   grid.replaceChildren();
   if (!devices?.length) {
@@ -551,6 +556,9 @@ function renderAccounts(view) {
   const list = $('accountList');
   if (!list) return;
   const accounts = view.accounts || [];
+  const key = JSON.stringify([view.selected, accounts.map(account => [account.id, account.name, account.running, account.authenticated, account.icloud_activated, account.family_organizer, account.family_member, account.family_stale, account.family_organizer_account])]);
+  if (key === accountsRenderKey) return;
+  accountsRenderKey = key;
   const cachedOrganizers = accounts.filter(account => account.family_organizer);
   if (cachedOrganizers.length === 1) {
     poolOrganizerAccount = cachedOrganizers[0].id;
@@ -605,13 +613,14 @@ function renderAccounts(view) {
       renderPlans(null);
       resetHME();
       clearCode();
-      poll();
+      poll({ fresh: true });
     });
     list.append(item);
   }
 }
 
 function openLogin(mode) {
+  if (loginSubmitting) { notice('正在连接 Apple，请稍等'); return; }
   if (mode === 'reconnect' && current?.accounts?.length === 0) mode = 'add';
   loginMode = mode;
   loginAccount = selectedAccount;
@@ -621,12 +630,21 @@ function openLogin(mode) {
   $('rememberPassword').checked = mode === 'reconnect' && !!current?.status?.password_remembered;
   $('twofactor').value = 'trusted-device';
   $('loginDialog').querySelector('h2').textContent = mode === 'add' ? '添加 Apple 账户' : '重新连接当前账号';
+  renderLoginState();
   $('loginDialog').showModal();
   ($('appleID').readOnly ? $('password') : $('appleID')).focus();
 }
 
+function renderLoginState() {
+  const form = $('loginForm'), submit = form.querySelector('button[type="submit"]');
+  form.setAttribute('aria-busy', String(loginSubmitting));
+  submit.disabled = busy;
+  submit.textContent = loginSubmitting ? (loginMode === 'add' ? '正在添加…' : '正在连接…') : busy ? '请稍候…' : '登录';
+  for (const id of ['appleID', 'password', 'twofactor', 'rememberPassword']) $(id).disabled = loginSubmitting;
+}
+
 function scheduleAutoRefresh(view, activated) {
-  if (busy || autoRefreshScheduled || !activated) return;
+  if (busy || $('loginDialog').open || autoRefreshScheduled || !activated) return;
   const candidates = [];
   if (view.family && view.family_stale) candidates.push({ kind: 'family', action: 'family-info', checkedAt: view.family_checked_at });
   if (view.storage && view.storage_stale) candidates.push({ kind: 'storage', action: 'storage-info', checkedAt: view.storage_checked_at });
@@ -644,7 +662,7 @@ function scheduleAutoRefresh(view, activated) {
   if (target.kind === 'plan') renderPlans(view.storage_plan, { checkedAt: view.storage_plan_checked_at, stale: true });
   window.setTimeout(() => {
     autoRefreshScheduled = false;
-    if (account !== selectedAccount || busy) {
+    if (account !== selectedAccount || busy || $('loginDialog').open) {
       autoRefreshState.delete(key);
       clearAutoRefreshAttempt(key);
       releaseAutoRefreshLease(account);
@@ -703,6 +721,7 @@ function renderSecurityQuestions(view, ready) {
 
 function render(view) {
   current = view;
+  renderLoginState();
   selectedAccount = view.selected || selectedAccount;
   if (view.accounts) renderAccounts(view);
   if (view.family) {
@@ -935,19 +954,26 @@ function render(view) {
   scheduleAutoRefresh(view, activated);
 }
 
-let polling = false;
-async function poll() {
-  if (polling) return;
-  polling = true;
+let pollRequest = null;
+function poll({ fresh = false } = {}) {
+  if (pollRequest && !fresh) return pollRequest.promise;
+  // Account changes and completed mutations need a new snapshot immediately.
+  // Abort the obsolete read so it cannot delay or overwrite the next view.
+  pollRequest?.controller.abort();
+  const request = { controller: new AbortController(), promise: null };
+  pollRequest = request;
   const requested = selectedAccount;
-  try {
-    const view = await api('view');
-    if (requested === selectedAccount) render(view);
-  } catch (error) {
-    $('lastUpdated').textContent = '面板连接暂时中断';
-  } finally {
-    polling = false;
-  }
+  request.promise = (async () => {
+    try {
+      const view = await api('view', undefined, { signal: request.controller.signal });
+      if (pollRequest === request && requested === selectedAccount) render(view);
+    } catch (error) {
+      if (pollRequest === request && requested === selectedAccount && error.name !== 'AbortError') $('lastUpdated').textContent = '面板连接暂时中断';
+    } finally {
+      if (pollRequest === request) pollRequest = null;
+    }
+  })();
+  return request.promise;
 }
 
 function renderPlans(info, { checkedAt = '', stale = false } = {}) {
@@ -1350,13 +1376,16 @@ $('loginForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (busy) return;
   busy = true;
+  loginSubmitting = true;
+  const mode = loginMode;
   const creds = { apple_id: $('appleID').value.trim(), password: $('password').value, twofactor: $('twofactor').value, remember_password: $('rememberPassword').checked };
   $('password').value = '';
+  renderLoginState();
   try {
-    if (loginMode === 'reconnect' && loginAccount !== selectedAccount) throw new Error('当前账号已切换，请重新打开连接窗口');
-    const result = await api(loginMode === 'add' ? 'accounts/add' : 'start', creds);
+    if (mode === 'reconnect' && loginAccount !== selectedAccount) throw new Error('当前账号已切换，请重新打开连接窗口');
+    const result = await api(mode === 'add' ? 'accounts/add' : 'start', creds);
     if (!result.ok) throw new Error(result.message);
-    if (loginMode === 'add' && result.account_id) {
+    if (mode === 'add' && result.account_id) {
       selectedAccount = result.account_id;
       localStorage.setItem('selected-account', selectedAccount);
       familyInfo = null; familyAccount = ''; familyCheckedAt = ''; familyStale = false;
@@ -1368,14 +1397,16 @@ $('loginForm').addEventListener('submit', async event => {
     }
     $('loginDialog').close();
     notice(result.message);
-    await poll();
   } catch (error) {
     notice(error.message, true);
-    $('password').focus();
   } finally {
     busy = false;
+    loginSubmitting = false;
     creds.password = '';
-    await poll();
+    renderLoginState();
+    if ($('loginDialog').open) $('password').focus();
+    if (current?.selected === selectedAccount) render(current);
+    await poll({ fresh: true });
   }
 });
 $('smsForm').addEventListener('submit', event => {
