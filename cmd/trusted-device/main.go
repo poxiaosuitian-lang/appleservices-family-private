@@ -589,7 +589,7 @@ func run() (runErr error) {
 		if renewalPending != nil {
 			return renewalPending, nil
 		}
-		if *resumeSession || passwordRemembered {
+		if *resumeSession || passwordRemembered || reconnect.blocked {
 			saved, err := resumeSavedLogin(appleID, store, options...)
 			if err == nil {
 				_, err = saved.StorageInfo(ctx)
@@ -613,8 +613,9 @@ func run() (runErr error) {
 				prepareRenewal(candidate)
 			}
 			return candidate, loginErr
-		}, accountID, registration, renewalPending != nil || !*resumeSession && !passwordRemembered, password, &reconnect)
+		}, accountID, registration, renewalPending != nil || !*resumeSession && !passwordRemembered && !reconnect.blocked, password, &reconnect)
 		if err != nil {
+			previousState := status.State
 			status.State = "refresh_failed"
 			if transientLoginFailure(err) {
 				renewalRecovery.schedule()
@@ -622,9 +623,12 @@ func run() (runErr error) {
 				renewalRecovery.stop()
 			}
 			if errors.Is(err, errVerificationRequired) || reconnect.blocked {
-				status.State, status.VerificationRequired = "verification_required", true
+				// A failed password fallback may have no challenge to submit.
+				// Keep checking the saved session on the normal renewal tick.
+				status.State, status.VerificationRequired = "reconnect_required", false
 				status.Authenticated = false
 				if renewalPending != nil && renewalPending.NeedsTwoFactor() {
+					status.VerificationRequired = true
 					status.State = "awaiting_device_code"
 					if renewalFactor == appleservices.SMS {
 						status.State = "awaiting_sms"
@@ -633,6 +637,10 @@ func run() (runErr error) {
 				if panel != nil {
 					panel.SetReady(false)
 				}
+			}
+			if previousState != status.State {
+				// Log the error class only. Apple response bodies may contain account data.
+				fmt.Fprintf(os.Stderr, "Renewal state=%s error_type=%T\n", status.State, err)
 			}
 			status.save(*dir)
 			return control.Result{Message: "续登录失败，请检查登录状态"}
@@ -1697,7 +1705,7 @@ func run() (runErr error) {
 			if result.OK {
 				fmt.Printf("Session renewed. Device query succeeded: count=%d, installation_visible=%t.\n", status.DeviceCount, status.InstallationVisible)
 			} else {
-				fmt.Fprintln(os.Stderr, "Session renewal failed; retaining the existing connection.")
+				fmt.Fprintf(os.Stderr, "Session renewal incomplete (state=%s).\n", status.State)
 			}
 		case event := <-events:
 			if event.Unsupported {

@@ -551,11 +551,16 @@ function renderFamilyMemberOptions(accounts, organizerID) {
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
 }
 
+const codeEntryStates = new Set(['awaiting_sms', 'awaiting_existing_sms', 'awaiting_device_code', 'awaiting_account_validation']);
+function needsReconnect(state) {
+  return state === 'reconnect_required' || state === 'verification_required';
+}
+
 function renderAccounts(view) {
   const list = $('accountList');
   if (!list) return;
   const accounts = view.accounts || [];
-  const key = JSON.stringify([view.selected, accounts.map(account => [account.id, account.name, account.running, account.authenticated, account.icloud_activated, account.family_organizer, account.family_member, account.family_stale, account.family_organizer_account])]);
+  const key = JSON.stringify([view.selected, accounts.map(account => [account.id, account.name, account.state, account.running, account.authenticated, account.icloud_activated, account.family_organizer, account.family_member, account.family_stale, account.family_organizer_account])]);
   if (key === accountsRenderKey) return;
   accountsRenderKey = key;
   const cachedOrganizers = accounts.filter(account => account.family_organizer);
@@ -592,7 +597,7 @@ function renderAccounts(view) {
       strong.append(role);
     }
     const small = document.createElement('small');
-    const state = account.running ? (account.authenticated ? '在线' : '连接中') : account.icloud_activated ? 'iCloud 已激活' : '已停止';
+    const state = account.running ? (account.authenticated ? '在线' : needsReconnect(account.state) ? '需重连' : codeEntryStates.has(account.state) ? '待验证' : '连接中') : account.icloud_activated ? 'iCloud 已激活' : '已停止';
     small.textContent = organizer ? '家庭组织者 · ' + state : account.running && account.authenticated ? '在线工作区' : state;
     copy.append(strong, small);
     const dot = document.createElement('i');
@@ -734,7 +739,7 @@ function render(view) {
   } else if (planAccount === selectedAccount && planCheckedAt) renderPlans(null);
   renderActivation(view);
 
-  const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, waiting = status.verification_required, running = status.running || view.launching, starting = running && !online && !waiting;
+  const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, reconnectRequired = !online && needsReconnect(status.state), waiting = status.verification_required && !reconnectRequired, running = status.running || view.launching, starting = running && !online && !waiting && !reconnectRequired;
   renderAppPassword(view, online);
   $('serverSyncButton').disabled = busy || !online || !view.control_ready;
   if ($('serverSyncDialog').open && (serverSyncAccount !== selectedAccount || serverSyncPID !== (status.pid || 0))) $('serverSyncDialog').close();
@@ -798,7 +803,8 @@ function render(view) {
     starting: '正在建立后台连接',
     failed: '后台登录未完成',
     refresh_failed: '登录刷新暂未完成',
-    verification_required: '需要重新验证账户',
+    verification_required: '需要重新连接账户',
+    reconnect_required: '需要重新连接账户',
     awaiting_sms: '完成短信验证',
     awaiting_existing_sms: '输入已有短信验证码',
     awaiting_device_code: '输入设备验证码',
@@ -808,7 +814,7 @@ function render(view) {
     verifying_pairing: '正在验证设备配对'
   };
   $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户'));
-  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
+  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : reconnectRequired ? '自动续期未完成，可点击“重新连接”恢复登录。' : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
 
   const pairingStates = {
     awaiting_approval: '收到官方客户端配对请求，请在登录请求中允许。',
@@ -829,9 +835,9 @@ function render(view) {
   $('statusBadge').className = 'status-badge' + (online ? ' online' : waiting || starting ? ' waiting' : '');
   $('statusBadge').replaceChildren();
   const dot = document.createElement('i');
-  $('statusBadge').append(dot, document.createTextNode(online ? '在线' : waiting ? '待验证' : starting ? '连接中' : '未连接'));
+  $('statusBadge').append(dot, document.createTextNode(online ? '在线' : reconnectRequired ? '需重连' : waiting ? '待验证' : starting ? '连接中' : '未连接'));
 
-  $('authState').textContent = online ? '已认证' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
+  $('authState').textContent = online ? '已认证' : reconnectRequired ? '需重连' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
   $('pushState').textContent = status.push_connected ? '已连接' : status.push_issue === 'reconnecting' ? '重连中' : '未连接';
   $('renewState').textContent = online ? '每 10 分钟' : activated ? '按需验证' : '等待登录';
   for (const [id, active] of [['authDot', online], ['pushDot', status.push_connected], ['renewDot', online]]) $(id).classList.toggle('active', !!active);
@@ -843,8 +849,8 @@ function render(view) {
   sub.textContent = 'Windows 工作空间';
   $('sidebarAccount').append(sub);
 
-  $('startButton').hidden = running;
-  $('startButton').textContent = status.state === 'failed' ? '重新连接' : '连接账户';
+  $('startButton').hidden = running && !reconnectRequired;
+  $('startButton').textContent = reconnectRequired || status.state === 'failed' ? '重新连接' : '连接账户';
   $('startButton').disabled = busy || starting;
   $('renewButton').hidden = !online;
   $('renewButton').disabled = busy || !view.control_ready;
@@ -899,7 +905,7 @@ function render(view) {
   $('hmeReachableCode').disabled = busy;
   $('hmeReachableCodeForm').querySelector('button').disabled = busy;
 
-  $('smsPanel').hidden = !['awaiting_sms', 'awaiting_existing_sms', 'awaiting_device_code', 'awaiting_account_validation'].includes(status.state);
+  $('smsPanel').hidden = !codeEntryStates.has(status.state);
   $('smsPanel').querySelector('h3').textContent = deviceCode ? '输入受信任设备上的验证码' : '输入短信验证码';
   $('smsPanel').querySelector('p').textContent = localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或重新连接并选择短信验证。' : localVerificationFailed ? '本机验证未完成。请填写受信任设备上的六位验证码，或重新连接并选择短信验证。' : deviceCode ? '请在已登录该账号的受信任 Apple 设备上获取六位验证码。' : status.state === 'awaiting_existing_sms' ? '提交已经收到的短信码；本次不会再次发送短信。' : '验证码已发送到账户绑定的手机号。';
   const codeLabel = deviceCode ? '六位设备验证码' : '六位短信验证码';

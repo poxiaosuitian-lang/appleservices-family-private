@@ -49,6 +49,20 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await page.goto('http://dashboard.test');
     await page.waitForFunction(() => current?.selected === 'fixture-0' && !pollRequest);
 
+    const initial = snapshot('fixture-0');
+    for (const state of ['verification_required', 'reconnect_required', 'awaiting_device_code']) {
+      const view = structuredClone(initial);
+      const challenge = state === 'awaiting_device_code';
+      Object.assign(view.status, { state, authenticated: false, verification_required: state !== 'reconnect_required' });
+      Object.assign(view.accounts[0], { state, authenticated: false });
+      await page.evaluate(v => render(v), view);
+      assert.equal(await page.locator('#smsPanel').evaluate(e => e.hidden), !challenge);
+      assert.equal(await page.locator('#startButton').evaluate(e => e.hidden), challenge);
+      assert(!(await page.locator('#sessionDescription').innerText()).includes('绑定手机号'));
+      assert((await page.locator('#accountList .account-item').first().innerText()).includes(challenge ? '待验证' : '需重连'));
+    }
+    await page.evaluate(v => render(v), initial);
+
     // Repeated unchanged views preserve nodes and keyboard focus.
     assert.equal(await page.evaluate(() => {
       const account = $('accountList').firstChild, device = $('deviceGrid').firstChild;
