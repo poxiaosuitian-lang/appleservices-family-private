@@ -68,6 +68,19 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await update();
     assert.equal(await page.locator('#accountList .account-role').count(), 0);
     assert.equal(await page.locator('#familyStatusChip').textContent(), '待读取');
+    // Personal iCloud+ subscribers can host a family. Shared capacity and
+    // activation alone must not turn ordinary accounts or members into hosts.
+    view.accounts[0].icloud_plus = true;
+    view.accounts[1].family_member = true;
+    view.accounts[1].icloud_plus = true;
+    view.accounts.push({id:'ordinary', name:'Ordinary', icloud_activated:true});
+    await update();
+    assert.deepEqual(await page.locator('#accountList .account-role').allTextContents(), ['母号','子号']);
+    assert.deepEqual(await page.locator('#familyOrganizer option').evaluateAll(es => es.map(e => e.value)), ['', 'mother']);
+    view.accounts[0].icloud_plus = false;
+    await update();
+    assert.deepEqual(await page.locator('#familyOrganizer option').evaluateAll(es => es.map(e => e.value)), ['']);
+    assert.deepEqual(await page.locator('#accountList .account-role').allTextContents(), ['子号']);
     assert.deepEqual(actions, []);
     assert.deepEqual(errors, []);
     console.log('family status UI regressions passed');

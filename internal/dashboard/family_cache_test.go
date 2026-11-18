@@ -9,8 +9,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Laky-64/appleservices/icloud"
 	"github.com/Laky-64/appleservices/internal/control"
 )
+
+func TestListAccountsUsesPersonalPaidStorage(t *testing.T) {
+	account := &Account{ID: "subscriber", Dir: t.TempDir()}
+	server := &Server{accounts: []*Account{account}}
+	for _, paid := range []uint64{50 << 30, 0} {
+		if _, err := writeStorageCache(account, &icloud.StorageInfo{TotalBytes: 50 << 30, PaidBytes: paid}); err != nil {
+			t.Fatal(err)
+		}
+		got := server.listAccounts(context.Background())[0]
+		if got.ICloudPlus != (paid > 0) || got.FamilyOrganizer {
+			t.Fatal("personal subscription was confused with shared capacity or family organizer status")
+		}
+	}
+}
 
 func TestListAccountsResolvesOrganizerForEveryCachedMember(t *testing.T) {
 	root := t.TempDir()

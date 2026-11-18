@@ -39,6 +39,7 @@ type AccountView struct {
 	Running                bool   `json:"running"`
 	Authenticated          bool   `json:"authenticated"`
 	ICloudActivated        bool   `json:"icloud_activated"`
+	ICloudPlus             bool   `json:"icloud_plus"`
 	FamilyMember           bool   `json:"family_member,omitempty"`
 	FamilyOrganizer        bool   `json:"family_organizer,omitempty"`
 	FamilyOrganizerAccount string `json:"family_organizer_account,omitempty"`

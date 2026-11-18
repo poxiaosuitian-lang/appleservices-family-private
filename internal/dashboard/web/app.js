@@ -518,6 +518,9 @@ function renderHME(info) {
   $('hmeMoreButton').hidden = aliases.length <= hmeVisible;
 }
 
+function isMotherAccount(account) {
+  return !!account.family_organizer || (!!account.icloud_plus && !account.family_member);
+}
 function renderOrganizerOptions(accounts, selected) {
   const select = $('familyOrganizer'), previous = select.value;
   select.replaceChildren();
@@ -526,10 +529,10 @@ function renderOrganizerOptions(accounts, selected) {
   placeholder.textContent = '选择母号';
   select.append(placeholder);
   for (const account of accounts) {
-    if (account.id === selected || !account.icloud_activated) continue;
+    if (account.id === selected || !account.icloud_activated || !isMotherAccount(account)) continue;
     const option = document.createElement('option');
     option.value = account.id;
-    option.textContent = (account.family_organizer ? '★ 家庭母号 · ' : '') + (account.name || account.id) + ' · ' + account.id;
+    option.textContent = (account.name || account.id) + ' · 母号';
     select.append(option);
   }
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
@@ -561,10 +564,10 @@ function renderAccounts(view) {
   const list = $('accountList');
   if (!list) return;
   const accounts = view.accounts || [];
-  const key = JSON.stringify([view.selected, accounts.map(account => [account.id, account.name, account.state, account.running, account.authenticated, account.icloud_activated, account.family_organizer, account.family_member, account.family_stale, account.family_organizer_account])]);
+  const key = JSON.stringify([view.selected, accounts.map(account => [account.id, account.name, account.state, account.running, account.authenticated, account.icloud_activated, account.icloud_plus, account.family_organizer, account.family_member, account.family_stale, account.family_organizer_account])]);
   if (key === accountsRenderKey) return;
   accountsRenderKey = key;
-  const cachedOrganizers = accounts.filter(account => account.family_organizer);
+  const cachedOrganizers = accounts.filter(isMotherAccount);
   if (cachedOrganizers.length === 1) {
     poolOrganizerAccount = cachedOrganizers[0].id;
     poolOrganizerName = cachedOrganizers[0].name || cachedOrganizers[0].id;
@@ -580,7 +583,8 @@ function renderAccounts(view) {
   list.replaceChildren();
   for (const account of accounts) {
     // A remembered dropdown choice is not evidence of Family Sharing membership.
-    const organizer = !!account.family_organizer;
+    const organizer = isMotherAccount(account);
+    const child = !!account.family_member && !account.family_organizer;
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'account-item' + (account.id === view.selected ? ' active' : '') + (organizer ? ' family-organizer' : '');
@@ -591,15 +595,15 @@ function renderAccounts(view) {
     copy.className = 'account-item-copy';
     const strong = document.createElement('strong');
     strong.textContent = account.name || account.id;
-    if (organizer) {
+    if (organizer || child) {
       const role = document.createElement('span');
       role.className = 'account-role';
-      role.textContent = '母号';
+      role.textContent = child ? '子号' : '母号';
       strong.append(role);
     }
     const small = document.createElement('small');
     const state = account.running ? (account.authenticated ? '在线' : needsReconnect(account.state) ? '需重连' : codeEntryStates.has(account.state) ? '待验证' : '连接中') : account.icloud_activated ? 'iCloud 已激活' : '已停止';
-    small.textContent = organizer ? '家庭组织者 · ' + state : account.running && account.authenticated ? '在线工作区' : state;
+    small.textContent = account.family_organizer ? '家庭组织者 · ' + state : child ? '家庭成员 · ' + state : organizer ? 'iCloud+ · ' + state : account.running && account.authenticated ? '在线工作区' : state;
     copy.append(strong, small);
     const dot = document.createElement('i');
     dot.className = account.running && account.authenticated ? 'on' : account.running ? 'waiting' : account.icloud_activated ? 'activated' : '';
