@@ -225,7 +225,7 @@ func run() error {
 		for service, token := range saved.Tokens {
 			services[service] = map[string]any{"token": token}
 		}
-		auth = &gsa.LoginResult{SessionPayload: map[string]any{"adsid": saved.DSID, "t": services}}
+		auth = &gsa.LoginResult{SessionPayload: map[string]any{"adsid": saved.DSID, "t": services, "GsIdmsToken": saved.DeviceIdentityToken}}
 		if _, err := client.AnisetteHeaders(); err != nil {
 			return err
 		}
