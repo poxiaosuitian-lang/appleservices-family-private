@@ -186,7 +186,8 @@ func (e *droppedRequestError) Error() string {
 
 // Temporary preserves transport classification without exposing response data.
 // Rate limits and access refusals require separate handling, not reconnect loops.
-func (e *droppedRequestError) Temporary() bool { return e.status == 0 || e.status/100 == 5 }
+func (e *droppedRequestError) Temporary() bool     { return e.status == 0 || e.status/100 == 5 }
+func (e *droppedRequestError) HTTPStatusCode() int { return e.status }
 
 // gsaRoundTrip performs one GrandSlam call. It reports a droppedRequestError
 // when the edge answered without forwarding the request.

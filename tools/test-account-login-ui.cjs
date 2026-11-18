@@ -50,16 +50,18 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await page.waitForFunction(() => current?.selected === 'fixture-0' && !pollRequest);
 
     const initial = snapshot('fixture-0');
-    for (const state of ['verification_required', 'reconnect_required', 'awaiting_device_code']) {
+    for (const state of ['verification_required', 'reconnect_required', 'awaiting_device_code', 'auto_reconnecting']) {
       const view = structuredClone(initial);
       const challenge = state === 'awaiting_device_code';
-      Object.assign(view.status, { state, authenticated: false, verification_required: state !== 'reconnect_required' });
+      const automatic = state === 'auto_reconnecting';
+      Object.assign(view.status, { state, authenticated: false, verification_required: challenge || state === 'verification_required' });
       Object.assign(view.accounts[0], { state, authenticated: false });
       await page.evaluate(v => render(v), view);
       assert.equal(await page.locator('#smsPanel').evaluate(e => e.hidden), !challenge);
-      assert.equal(await page.locator('#startButton').evaluate(e => e.hidden), challenge);
+      assert.equal(await page.locator('#startButton').evaluate(e => e.hidden), challenge || automatic);
+      if (automatic) assert.match(await page.locator('#sessionTitle').innerText(), /自动重新登录/);
       assert(!(await page.locator('#sessionDescription').innerText()).includes('绑定手机号'));
-      assert((await page.locator('#accountList .account-item').first().innerText()).includes(challenge ? '待验证' : '需重连'));
+      assert((await page.locator('#accountList .account-item').first().innerText()).includes(challenge ? '待验证' : automatic ? '连接中' : '需重连'));
     }
     await page.evaluate(v => render(v), initial);
 

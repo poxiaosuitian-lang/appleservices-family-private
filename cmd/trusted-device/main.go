@@ -592,6 +592,11 @@ func run() (runErr error) {
 		if *resumeSession || passwordRemembered || reconnect.blocked {
 			saved, err := resumeSavedLogin(appleID, store, options...)
 			if err == nil {
+				// Older checkpoints restore only GSA. Initialize the iCloud
+				// client just as we do on startup before checking quota.
+				_, err = saved.Client()
+			}
+			if err == nil {
 				_, err = saved.StorageInfo(ctx)
 			}
 			return saved, err
@@ -617,17 +622,17 @@ func run() (runErr error) {
 		if err != nil {
 			previousState := status.State
 			status.State = "refresh_failed"
-			if transientLoginFailure(err) {
-				renewalRecovery.schedule()
-			} else {
-				renewalRecovery.stop()
-			}
-			if errors.Is(err, errVerificationRequired) || reconnect.blocked {
+			renewalRecovery.afterFailure(err, reconnect.retryAt)
+			if errors.Is(err, errVerificationRequired) || reconnect.blocked || reconnect.recovering {
 				// A failed password fallback may have no challenge to submit.
 				// Keep checking the saved session on the normal renewal tick.
 				status.State, status.VerificationRequired = "reconnect_required", false
 				status.Authenticated = false
+				if renewalRecovery.channel() != nil {
+					status.State = "auto_reconnecting"
+				}
 				if renewalPending != nil && renewalPending.NeedsTwoFactor() {
+					renewalRecovery.stop()
 					status.VerificationRequired = true
 					status.State = "awaiting_device_code"
 					if renewalFactor == appleservices.SMS {
@@ -640,9 +645,12 @@ func run() (runErr error) {
 			}
 			if previousState != status.State {
 				// Log the error class only. Apple response bodies may contain account data.
-				fmt.Fprintf(os.Stderr, "Renewal state=%s error_type=%T\n", status.State, err)
+				fmt.Fprintf(os.Stderr, "Renewal state=%s error=%s\n", status.State, renewalDiagnostic(err))
 			}
 			status.save(*dir)
+			if status.State == "auto_reconnecting" {
+				return control.Result{Stage: "auto-reconnecting", Message: "正在自动重新登录"}
+			}
 			return control.Result{Message: "续登录失败，请检查登录状态"}
 		}
 		if previousLogin, ok := active.(*appleservices.Login); ok {

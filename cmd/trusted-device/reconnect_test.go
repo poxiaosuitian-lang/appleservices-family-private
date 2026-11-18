@@ -60,6 +60,63 @@ func TestNetworkFailureDuringPasswordFallbackDoesNotRequireOTP(t *testing.T) {
 	}
 }
 
+func TestInterruptedHandshakeHasBoundedAutomaticRecovery(t *testing.T) {
+	var gate reconnectGate
+	var retry renewalRetry
+	defer retry.stop()
+	begin := func() (maintainedLogin, error) { return nil, &icloud.StorageError{HTTPStatus: 401} }
+	attempts := 0
+	fresh := func() (maintainedLogin, error) {
+		attempts++
+		return nil, errors.Join(errors.New("incomplete handshake"), nil)
+	}
+	renew := func() {
+		_, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+		retry.afterFailure(err, gate.retryAt)
+	}
+	for n := 1; n <= 3; n++ {
+		renew()
+		if attempts != n || (retry.channel() != nil) != (n < 3) {
+			t.Fatalf("attempt %d: calls=%d, scheduled=%t", n, attempts, retry.channel() != nil)
+		}
+		renew()
+		if attempts != n {
+			t.Fatal("ordinary renewal bypassed the cooldown")
+		}
+		if n < 3 {
+			gate.retryAt = time.Now().Add(-time.Second)
+		}
+	}
+}
+
+func TestRejectedPasswordRemainsBlocked(t *testing.T) {
+	var gate reconnectGate
+	denied := &gsa.AuthenticationError{Code: -20101, ServerMessage: "private"}
+	begin := func() (maintainedLogin, error) { return nil, &icloud.StorageError{HTTPStatus: 401} }
+	fresh := func() (maintainedLogin, error) { return nil, errors.Join(denied, nil) }
+	_, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if !gate.blocked || !gate.retryAt.IsZero() || renewalDiagnostic(err) != "gsa http=0 code=-20101" {
+		t.Fatal("explicit authentication rejection must stop retries and log only numeric codes")
+	}
+}
+
+func TestDueHandshakeRetryRestoresSession(t *testing.T) {
+	var gate reconnectGate
+	begin := func() (maintainedLogin, error) { return nil, &icloud.StorageError{HTTPStatus: 401} }
+	interrupted := func() (maintainedLogin, error) { return nil, errors.New("incomplete handshake") }
+	renewWithReconnect(begin, interrupted, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if gate.retryAt.IsZero() {
+		t.Fatal("no automatic retry scheduled")
+	}
+	gate.retryAt = time.Now()
+	session := &fakeMaintainedLogin{account: "owner"}
+	fresh := func() (maintainedLogin, error) { return session, nil }
+	got, _, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+	if err != nil || got != session || session.saved != 1 || gate != (reconnectGate{}) {
+		t.Fatal("automatic retry did not restore and checkpoint the account")
+	}
+}
+
 func TestPendingRenewalResumesVerifiedCandidateWithoutAnotherPasswordLogin(t *testing.T) {
 	gate := reconnectGate{}
 	candidate := &fakeMaintainedLogin{account: "owner", challenge: true}

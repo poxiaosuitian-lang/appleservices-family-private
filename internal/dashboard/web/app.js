@@ -803,6 +803,7 @@ function render(view) {
     starting: '正在建立后台连接',
     failed: '后台登录未完成',
     refresh_failed: '登录刷新暂未完成',
+    auto_reconnecting: '正在自动重新登录',
     verification_required: '需要重新连接账户',
     reconnect_required: '需要重新连接账户',
     awaiting_sms: '完成短信验证',

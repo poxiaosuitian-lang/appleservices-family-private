@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -20,7 +21,14 @@ type loginPasswordStore interface {
 func renewWithReconnect(begin, fresh func() (maintainedLogin, error), accountID string, registration appleservices.DeviceRegistration, register bool, password string, gate *reconnectGate) (maintainedLogin, []appleservices.AccountDevice, error) {
 	login, devices, err := renewSessionMode(begin, accountID, registration, register)
 	if gate.allow(err, password) {
-		login, devices, err = renewSession(fresh, accountID, registration)
+		gate.recovering = true
+		candidate, loginErr := fresh()
+		if loginErr != nil {
+			err = loginErr
+			gate.deferHandshakeRetry(loginErr, time.Now())
+		} else {
+			login, devices, err = renewSession(func() (maintainedLogin, error) { return candidate, nil }, accountID, registration)
+		}
 		// A disconnected password request is not a rejected password or an OTP
 		// challenge. Leave it eligible for the next backed-off renewal.
 		if transientLoginFailure(err) {
@@ -28,7 +36,7 @@ func renewWithReconnect(begin, fresh func() (maintainedLogin, error), accountID 
 		}
 	}
 	if err == nil {
-		gate.blocked = false
+		*gate = reconnectGate{}
 	}
 	return login, devices, err
 }
@@ -61,7 +69,7 @@ func transientLoginFailure(err error) bool {
 	return errors.As(err, &delegate) && delegate.HTTPStatus/100 == 5
 }
 
-// This timer exists only after a transient renewal failure, never while online.
+// The retry timer is inactive while the session is healthy.
 type renewalRetry struct {
 	timer *time.Timer
 	delay time.Duration
@@ -92,6 +100,17 @@ func (r *renewalRetry) schedule() {
 	r.timer = time.NewTimer(r.delay)
 }
 
+func (r *renewalRetry) afterFailure(err error, retryAt time.Time) {
+	if delay := time.Until(retryAt); delay > 0 {
+		r.stop()
+		r.timer = time.NewTimer(delay)
+	} else if transientLoginFailure(err) {
+		r.schedule()
+	} else {
+		r.stop()
+	}
+}
+
 func savedLoginPassword(store any, appleID string) string {
 	if protected, ok := store.(loginPasswordStore); ok {
 		password, _ := protected.LoadLoginPassword(appleID)
@@ -118,12 +137,61 @@ func sessionAuthenticationRejected(err error) bool {
 	return status == 401 || status == 403
 }
 
-type reconnectGate struct{ blocked bool }
+type reconnectGate struct {
+	blocked    bool
+	recovering bool
+	retryAt    time.Time
+	retries    int
+}
+
+// Only a failed handshake without a definitive response gets another password
+// attempt. Never replay a challenge or a failure while adopting a fresh login.
+func (g *reconnectGate) deferHandshakeRetry(err error, now time.Time) {
+	var auth *gsa.AuthenticationError
+	var response interface{ HTTPStatusCode() int }
+	if errors.As(err, &auth) || (errors.As(err, &response) && response.HTTPStatusCode()/100 == 4) || errors.Is(err, errVerificationRequired) ||
+		errors.Is(err, context.Canceled) || transientLoginFailure(err) || g.retries >= 2 {
+		return
+	}
+	g.retries++
+	delay := time.Minute
+	if g.retries == 2 {
+		delay = 5 * time.Minute
+	}
+	g.retryAt = now.Add(delay)
+}
 
 func (g *reconnectGate) allow(err error, password string) bool {
-	if g.blocked || password == "" || !sessionAuthenticationRejected(err) {
+	if password == "" || !sessionAuthenticationRejected(err) {
 		return false
 	}
+	if g.blocked && (g.retryAt.IsZero() || time.Now().Before(g.retryAt)) {
+		return false
+	}
+	g.retryAt = time.Time{}
 	g.blocked = true
 	return true
+}
+
+// Log only error classes and numeric response codes, including wrapped GSA errors.
+func renewalDiagnostic(err error) string {
+	var response interface{ HTTPStatusCode() int }
+	var auth *gsa.AuthenticationError
+	var device *gsa.DeviceRequestError
+	var storage *icloud.StorageError
+	var delegate *icloud.DelegateError
+	switch {
+	case errors.As(err, &auth):
+		return fmt.Sprintf("gsa http=%d code=%d", auth.HTTPStatus, auth.Code)
+	case errors.As(err, &device):
+		return fmt.Sprintf("devices http=%d code=%d", device.HTTPStatus, device.Code)
+	case errors.As(err, &storage):
+		return fmt.Sprintf("storage http=%d", storage.HTTPStatus)
+	case errors.As(err, &delegate):
+		return fmt.Sprintf("delegate http=%d", delegate.HTTPStatus)
+	case errors.As(err, &response):
+		return fmt.Sprintf("handshake http=%d", response.HTTPStatusCode())
+	default:
+		return fmt.Sprintf("%T", err)
+	}
 }
