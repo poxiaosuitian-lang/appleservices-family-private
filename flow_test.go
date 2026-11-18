@@ -368,11 +368,87 @@ func TestSessionSaveFailureDoesNotReturnSuccess(t *testing.T) {
 
 type verifiedBackend struct{ *fakeBackend }
 
+func TestRejectedVerificationHeaderSessionRefreshesOnce(t *testing.T) {
+	for _, rejectedAgain := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recovered", true: "still-rejected"}[rejectedAgain], func(t *testing.T) {
+			s := &memoryStore{}
+			fresh := testResult(false)
+			fresh.SessionPayload["t"] = map[string]any{"com.apple.gs.idms.pet": map[string]any{"token": "fresh-pet"}}
+			b := &verifiedBackend{&fakeBackend{results: []*gsa.LoginResult{testResult(true), fresh}}}
+			calls := 0
+			fetch := func(h map[string]string, id, adsid, pet string) (icloud.DelegateTokens, error) {
+				calls++
+				if calls == 2 && pet != "fresh-pet" {
+					t.Fatal("reused rejected PET")
+				}
+				if calls == 1 || rejectedAgain {
+					return icloud.DelegateTokens{}, &icloud.DelegateError{Stage: "mobileme delegate refused status=1"}
+				}
+				return testDelegate(h, id, adsid, pet)
+			}
+			opts := testOptions(b.fakeBackend, fetch)
+			opts = append(opts, func(o *options) { o.newBackend = func(gsa.AnisetteProvider, *gsa.Session) loginBackend { return b } })
+			l, err := BeginLogin(Credentials{"owner@example.test", "test-password"}, s, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := l.SubmitCode(SMS, "123456"); err != nil {
+				t.Fatal(err)
+			}
+			_, err = l.Client()
+			if (err != nil) != rejectedAgain || b.calls != 2 || calls != 2 || len(b.submits) != 1 || len(b.requests) != 0 {
+				t.Fatalf("unexpected recovery: err=%v logins=%d delegates=%d", err, b.calls, calls)
+			}
+		})
+	}
+}
+
 func (b *verifiedBackend) VerifiedLoginResult() *gsa.LoginResult {
 	if len(b.submits) == 0 {
 		return nil
 	}
 	return testResult(false)
+}
+
+func TestVerificationRefreshDoesNotExchangeUnverifiedOrMismatchedSession(t *testing.T) {
+	for _, scenario := range []string{"challenge", "wrong-account", "network-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			fresh := testResult(scenario == "challenge")
+			if scenario == "wrong-account" {
+				fresh.SessionPayload["adsid"] = "another-account"
+			}
+			b := &verifiedBackend{&fakeBackend{results: []*gsa.LoginResult{testResult(true), fresh}}}
+			store := &memoryStore{}
+			delegates := 0
+			fetch := func(map[string]string, string, string, string) (icloud.DelegateTokens, error) {
+				delegates++
+				if scenario == "network-error" {
+					return icloud.DelegateTokens{}, errors.New("connection lost")
+				}
+				return icloud.DelegateTokens{}, &icloud.DelegateError{Stage: "mobileme delegate refused status=1"}
+			}
+			opts := testOptions(b.fakeBackend, fetch)
+			opts = append(opts, func(o *options) {
+				o.newBackend = func(gsa.AnisetteProvider, *gsa.Session) loginBackend { return b }
+			})
+			login, err := BeginLogin(Credentials{"owner@example.test", "test-password"}, store, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := login.SubmitCode(SMS, "123456"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := login.Client(); err == nil || delegates != 1 || store.saves != 1 || store.session.DSID != "test-adsid" {
+				t.Fatal("unverified response exchanged or overwrote checkpoint")
+			}
+			if scenario == "network-error" && b.calls != 1 {
+				t.Fatal("network failure triggered password authentication")
+			}
+			if scenario != "network-error" && !login.NeedsTwoFactor() {
+				t.Fatal("unverified session remained eligible for delegate exchange")
+			}
+		})
+	}
 }
 
 func TestIssuedVerificationPETAvoidsAnotherChallenge(t *testing.T) {

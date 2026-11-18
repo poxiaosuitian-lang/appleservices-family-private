@@ -33,21 +33,22 @@ func defaultBackend(p gsa.AnisetteProvider, sess *gsa.Session) loginBackend {
 // Login handles Apple ID authentication and any pending two-factor challenge.
 // Call Client to complete iCloud login; no account data is fetched.
 type Login struct {
-	creds           Credentials
-	store           Store
-	backend         loginBackend
-	anisette        gsa.AnisetteProvider
-	stateful        *anisette.Provider
-	fetchDelegate   delegateFetcher
-	needsTwoFactor  bool
-	result          *gsa.LoginResult
-	adsid           string
-	idmsToken       string
-	client          *Client
-	serialNumber    string
-	storeCommerce   *icloud.StoreCommerceSession
-	gsaCheckpointed bool
-	localCodeTried  bool
+	creds                 Credentials
+	store                 Store
+	backend               loginBackend
+	anisette              gsa.AnisetteProvider
+	stateful              *anisette.Provider
+	fetchDelegate         delegateFetcher
+	needsTwoFactor        bool
+	result                *gsa.LoginResult
+	adsid                 string
+	idmsToken             string
+	client                *Client
+	serialNumber          string
+	storeCommerce         *icloud.StoreCommerceSession
+	gsaCheckpointed       bool
+	localCodeTried        bool
+	verifiedHeaderSession bool
 }
 
 func prepareLogin(creds Credentials, store Store, requirePassword bool, opts ...Option) (*Login, *Session, error) {
@@ -341,6 +342,7 @@ func (l *Login) SubmitCode(method TwoFactorMethod, code string) error {
 				return err
 			}
 			l.result = result
+			l.verifiedHeaderSession = true
 			l.needsTwoFactor = false
 			l.storeCommerce = nil
 			if err := l.persistDevice(); err != nil {
@@ -425,6 +427,25 @@ func (l *Login) Client() (*Client, error) {
 	}
 	dt, err := l.fetchDelegate(headers, l.creds.AppleID, l.adsid, pet)
 	if err != nil {
+		var refusal *icloud.DelegateError
+		if l.verifiedHeaderSession && l.creds.Password != "" && errors.As(err, &refusal) && refusal.Stage == "mobileme delegate refused status=1" {
+			// Some verification responses issue a PET that cannot yet be used
+			// for iCloud. Complete SRP with the same authenticated cookie jar
+			// once, while the user's password is still available in memory.
+			l.verifiedHeaderSession = false
+			accountID := l.adsid
+			if refreshErr := l.authenticate(); refreshErr != nil {
+				return nil, fmt.Errorf("appleservices: post-verification authentication: %w", refreshErr)
+			}
+			if l.adsid != accountID {
+				l.needsTwoFactor = true // Prevent subsequent callers from exchanging this mismatched session.
+				return nil, errors.New("appleservices: post-verification account binding changed")
+			}
+			if l.needsTwoFactor {
+				return nil, errors.New("appleservices: Apple requires further verification after refreshing the verified session")
+			}
+			return l.Client()
+		}
 		// Account-side registration can succeed without iCloud service data.
 		// Never turn that partial result into an authenticated iCloud client,
 		// including when an older launcher enables the retired degraded flag.
