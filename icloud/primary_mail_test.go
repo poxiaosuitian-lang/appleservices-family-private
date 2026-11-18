@@ -38,7 +38,7 @@ func TestPrimaryMailServiceFailureClassification(t *testing.T) {
 		{"activation-rejected", "/mailacct/v1/web/activateEmail", `{"errorCode":"-1234","errorMessage":"private-secret"}`, "邮箱创建（HTTP 403，代码 -1234）", 403, false},
 		{"session-expired", "/mailacct/v1/web/activateEmail", `{"errorCode":"-9008"}`, "邮箱创建未完成", 403, true},
 		{"numeric-session-expired", "/mailacct/v1/web/activateEmail", `{"errorCode":-9008}`, "邮箱创建未完成", 403, true},
-		{"numeric-rejection", "/mailacct/v1/web/emailAvailability", `{"errorCode":-9007}`, "邮箱名称检查（HTTP 200，代码 -9007）", 200, false},
+		{"numeric-rejection", "/mailacct/v1/web/emailAvailability", `{"errorCode":-9007}`, "邮箱名称检查，请稍后重试（HTTP 200，代码 -9007）", 200, false},
 		{"malformed-error", "/mailacct/v1/web/emailAvailability", `{"errorCode":{"private":"private-secret"},"available":true}`, "邮箱名称检查（HTTP 200）", 200, false},
 		{"session-unauthorized", "/setup/ws/1/validate", `{}`, "邮箱状态查询未完成", 401, true},
 		{"too-long", "/mailacct/v1/web/emailAvailability", `{"errorCode":"MAX_LENGTH_VIOLATION"}`, "3–20", 400, false},
@@ -121,6 +121,9 @@ func TestPrimaryMailCollisionAndVerifiedCreation(t *testing.T) {
 		if json.NewDecoder(r.Body).Decode(&body) != nil {
 			t.Fatal("invalid body")
 		}
+		if body["entryPoint"] != "USER_LAUNCH" {
+			t.Fatal("missing Mail entry point")
+		}
 		if r.URL.Path == "/mailacct/v1/web/emailAvailability" {
 			checks++
 			b, _ := json.Marshal(map[string]any{"email": body["email"], "available": checks > 1})
@@ -128,6 +131,9 @@ func TestPrimaryMailCollisionAndVerifiedCreation(t *testing.T) {
 		}
 		if r.URL.Path != "/mailacct/v1/web/activateEmail" || !marked {
 			t.Fatal("creation before durable checkpoint")
+		}
+		if pattern, ok := body["patternId"]; !ok || pattern != "" {
+			t.Fatal("custom mailbox name must not claim a suggested pattern")
 		}
 		creates++
 		exists = true
@@ -143,6 +149,22 @@ func TestPrimaryMailCollisionAndVerifiedCreation(t *testing.T) {
 	})
 	if err != nil || !info.Exists || info.Email == "" || checks != 2 || creates != 1 {
 		t.Fatalf("creation not verified: %+v %v %d %d", info, err, checks, creates)
+	}
+}
+
+func TestPrimaryMailTemporaryRejectionDoesNotSubmit(t *testing.T) {
+	c := mailTestClient(t, func(r *http.Request) (int, string, error) {
+		if r.URL.Path == "/setup/ws/1/validate" {
+			return 200, mailSetupResponse(false), nil
+		}
+		if r.URL.Path != "/mailacct/v1/web/emailAvailability" {
+			t.Fatal("rejected availability triggered creation")
+		}
+		return 403, `{"errorCode":"-9007","errorMessage":"private account details"}`, nil
+	})
+	_, err := c.Ensure(context.Background(), true, func(string) error { t.Fatal("rejected request marked submitted"); return nil })
+	if err == nil || !strings.Contains(err.Error(), "请稍后重试") || strings.Contains(err.Error(), "private") || errors.Is(err, ErrPrimaryMailAuthentication) {
+		t.Fatalf("unexpected temporary failure: %v", err)
 	}
 }
 

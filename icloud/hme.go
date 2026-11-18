@@ -114,8 +114,8 @@ func (c *HideMyEmailClient) resetHTTP() {
 	jar, _ := cookiejar.New(nil)
 	transport := gsa.AppleRootTransport().(*http.Transport)
 	transport.Proxy = nil
-	c.jar = jar
-	c.http = &http.Client{Jar: jar, Transport: transport, Timeout: 35 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	c.jar = &webSessionJar{CookieJar: jar}
+	c.http = &http.Client{Jar: c.jar, Transport: transport, Timeout: 35 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 func randomHex(bytesCount int) string {
@@ -141,7 +141,11 @@ func (c *HideMyEmailClient) loadSession() error {
 		if parseErr != nil || u.Scheme != "https" || u.Hostname() == "" || item.Name == "" {
 			continue
 		}
-		c.jar.SetCookies(u, []*http.Cookie{{Name: item.Name, Value: item.Value, Path: item.Path, Secure: item.Secure, Expires: item.Expires}})
+		if jar, ok := c.jar.(*webSessionJar); ok {
+			jar.restore(u, item)
+		} else {
+			c.jar.SetCookies(u, []*http.Cookie{{Name: item.Name, Value: item.Value, Path: item.Path, Secure: item.Secure, Expires: item.Expires}})
+		}
 	}
 	return nil
 }

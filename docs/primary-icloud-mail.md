@@ -10,11 +10,15 @@
 
 Apple 的[创建主要邮件地址说明](https://support.apple.com/zh-cn/guide/icloud/mmdd8d1c5c/icloud)提供网页创建入口。2026-11-11 检查的公开 [Mail 网页脚本](https://www.icloud.com/applications/mail2/2640Hotfix103/zh-cn/main.js)使用 setup 返回的 `mccgateway` 服务：
 
-- `POST mailacct/v1/web/emailAvailability`：`email`，返回同一名称和 `available`。
-- `POST mailacct/v1/web/activateEmail`：`email`，返回 `email`。网页的 `patternId` 和 `entryPoint` 为选用建议名/页面来源元数据，本实现使用自选名称，不伪造建议模式。
+- `POST mailacct/v1/web/emailAvailability`：`email` 和 `entryPoint: USER_LAUNCH`，返回同一名称和 `available`。
+- `POST mailacct/v1/web/activateEmail`：`email`、`entryPoint: USER_LAUNCH` 和空的 `patternId`，返回 `email`。空模式对应网页自选名称，不伪造建议模式。
 - setup `POST /setup/ws/1/validate`：检查当前账号与 `webservices.mail`。官方 Mail 同样以 mail 服务是否存在判断是否已经开通。
 
 网页 SRP、受信任设备验证复用现有认证实现，但邮箱独立保存 `primary-mail-session.json`，不复用隐藏邮件地址的资格限制。未知挑战、缺少安全问题答案、条款和 Apple 限制会显示为待处理，不冒充已完成。网页里完成验证不会直接向本程序转移浏览器 cookie；必要时需重新连接，让本程序重新建立会话。
+
+保存的会话是各主机的 Cookie 快照。Apple 在状态查询时轮换共享 Cookie 后，先移除快照恢复出的同名、同路径旧副本，避免后续邮箱请求同时发送新旧令牌。只依据所属 iCloud 域实际返回的 Cookie 域范围替换，不按名称扩大 Cookie 的发送范围。
+
+`HTTP 403 / -9007` 按 Apple 网页的临时请求失败处理，提示稍后重试，不误报密码错误或邮箱已开通。名称检查被拒绝时不写入创建提交标记；已经提交后的失败仍按不确定结果保护，不自动重复创建。
 
 网页认证按 Apple 返回的 SRP 协议派生密码证明：`s2k` 使用 SHA-256 原始摘要，`s2k_fo` 使用摘要的小写十六进制文本，再执行 PBKDF2。不能把两种协议都按 `s2k` 处理，否则正确密码也可能得到 HTTP 401。账号管理网页共用该派生实现；未知协议或异常迭代次数会停止认证，不提交密码证明。兼容性参考 [PyiCloud SRP 实现](https://pyicloud.readthedocs.io/en/2026.10.0/api/pyicloud-service/)。
 

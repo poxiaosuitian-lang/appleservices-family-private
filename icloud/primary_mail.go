@@ -131,7 +131,7 @@ func (c *PrimaryMailClient) Ensure(ctx context.Context, allowCreate bool, before
 			Email     string `json:"email"`
 			Available *bool  `json:"available"`
 		}
-		body := map[string]any{"email": email}
+		body := map[string]any{"email": email, "entryPoint": "USER_LAUNCH"}
 		if err := c.request(ctx, c.web.session.ServiceURL+"/mailacct/v1/web/emailAvailability", body, &available); err != nil {
 			return nil, err
 		}
@@ -150,6 +150,7 @@ func (c *PrimaryMailClient) Ensure(ctx context.Context, allowCreate bool, before
 		var created struct {
 			Email string `json:"email"`
 		}
+		body["patternId"] = "" // Custom name, matching Mail's web form.
 		createErr := c.request(ctx, c.web.session.ServiceURL+"/mailacct/v1/web/activateEmail", body, &created)
 		// Read back even on an error: a timeout does not imply Apple did nothing.
 		verified, verifyErr := c.Check(ctx)
@@ -207,6 +208,9 @@ func primaryMailServiceError(path string, status int, code string) error {
 	}
 	if status == 401 || status == 421 || code == "-9008" {
 		return fmt.Errorf("%s未完成（HTTP %d）：%w", stage, status, ErrPrimaryMailAuthentication)
+	}
+	if code == "-9007" {
+		return fmt.Errorf("Apple 暂时无法完成%s，请稍后重试（HTTP %d，代码 -9007）", stage, status)
 	}
 	detail := ""
 	switch code {
