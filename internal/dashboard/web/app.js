@@ -741,7 +741,8 @@ function render(view) {
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, reconnectRequired = !online && needsReconnect(status.state), waiting = status.verification_required && !reconnectRequired, running = status.running || view.launching, starting = running && !online && !waiting && !reconnectRequired;
   renderAppPassword(view, online);
-  $('serverSyncButton').disabled = busy || !online || !view.control_ready;
+  $('serverSyncButton').disabled = !online || !view.control_ready;
+  $('serverSyncResult').hidden = !$('serverSyncResult').textContent || $('serverSyncResult').dataset.account !== selectedAccount;
   if ($('serverSyncDialog').open && (serverSyncAccount !== selectedAccount || serverSyncPID !== (status.pid || 0))) $('serverSyncDialog').close();
   const nextVerificationContext = JSON.stringify([selectedAccount, status.pid || 0, status.state || '']);
   if (verificationContext !== nextVerificationContext) {
@@ -1465,6 +1466,7 @@ setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
 let syncProfiles = [], syncDefaultKeySaved = false, syncConfigBusy = false, syncPending = null, syncImported = null;
+let syncProfileLoad = null;
 function renderSyncVerification(result, preserveSource) {
   const source = $('serverSyncOTPSource');
   const previous = source.value;
@@ -1491,6 +1493,13 @@ function syncFeedback(message, failed = false) {
   $('serverSyncFeedback').textContent = message;
   $('serverSyncFeedback').classList.toggle('error', failed);
 }
+function syncResult(account, message, failed = false) {
+  const result = $('serverSyncResult');
+  result.dataset.account = account;
+  result.textContent = message;
+  result.classList.toggle('stale', failed);
+  result.hidden = account !== selectedAccount;
+}
 function syncConfigLock(locked) {
   syncConfigBusy = locked;
   for (const element of $('serverSyncForm').querySelectorAll('input, select, button')) {
@@ -1512,6 +1521,7 @@ function selectSyncProfile(id) {
   syncFeedback('');
 }
 function renderSyncProfiles(data) {
+  if (!Array.isArray(data?.profiles)) throw new Error('服务器配置读取失败，请重新打开同步窗口。');
   syncProfiles = data.profiles;
   syncDefaultKeySaved = !!data.default_key_saved;
   const select = $('serverSyncProfile');
@@ -1528,19 +1538,55 @@ async function saveSyncProfile() {
   return syncProfiles.find(item => item.id === data.selected);
 }
 $('serverSyncButton').addEventListener('click', async () => {
-  if ($('serverSyncButton').disabled || syncConfigBusy) return;
+  if ($('serverSyncButton').disabled) return;
+  if (syncConfigBusy && !syncProfileLoad) {
+    syncResult(selectedAccount, '上一次服务器操作仍在处理，请稍后再试。');
+    return;
+  }
+  syncProfileLoad?.abort();
+  const load = new AbortController();
+  syncProfileLoad = load;
   serverSyncAccount = selectedAccount; serverSyncPID = current?.status?.pid || 0;
   $('serverSyncAccount').textContent = current?.login_account || current?.account || '当前账号';
   selectSyncProfile('');
   $('serverSyncDialog').showModal();
   syncConfigLock(true);
+  syncFeedback('正在读取服务器配置…');
+  const timeout = setTimeout(() => load.abort(), 15000);
   let loaded = false;
-  try { renderSyncProfiles(await api('sync-profiles')); loaded = true; }
-  catch (error) { syncFeedback(error.message, true); }
-  finally { syncConfigLock(false); if (!loaded) for (const element of $('serverSyncForm').querySelectorAll('input, select, button')) { if (element.id !== 'serverSyncClose') element.disabled = true; } }
+  try {
+    const data = await api('sync-profiles', undefined, {signal:load.signal});
+    if (syncProfileLoad !== load) return;
+    renderSyncProfiles(data);
+    loaded = true;
+  } catch (error) {
+    if (syncProfileLoad === load) {
+      const message = load.signal.aborted ? '读取配置超时，请关闭后重新打开。' : error.message;
+      syncFeedback(message, true);
+      syncResult(serverSyncAccount, message, true);
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (syncProfileLoad === load) {
+      syncProfileLoad = null;
+      syncConfigLock(!loaded);
+      // A failed read locks this incomplete form only until it is closed.
+      syncConfigBusy = false;
+    }
+  }
 });
 $('serverSyncClose').addEventListener('click', () => $('serverSyncDialog').close());
-$('serverSyncDialog').addEventListener('close', () => { $('serverSyncToken').value = ''; resetSyncLogin(); });
+$('serverSyncDialog').addEventListener('close', () => {
+  if ($('serverSyncDialog').open) return;
+  if (syncProfileLoad) {
+    const load = syncProfileLoad;
+    syncProfileLoad = null;
+    load.abort();
+    syncConfigLock(false);
+  }
+  $('serverSyncToken').value = '';
+  resetSyncLogin();
+});
 $('serverSyncProfile').addEventListener('change', async () => {
   const id = $('serverSyncProfile').value;
   selectSyncProfile(id);
@@ -1581,11 +1627,14 @@ $('serverSyncForm').addEventListener('submit', async event => {
   syncConfigLock(true);
   busy = true;
   syncFeedback('正在保存服务器配置…');
+  syncResult(account, '正在同步…');
+  let completed = false;
   try {
     const pending = syncPending;
     const recoveryEnabled = $('serverRecoveryEnabled').checked;
     const profile = syncImported || await saveSyncProfile();
-    if (!profile || !sameSession()) return;
+    if (!sameSession()) return;
+    if (!profile) throw new Error('服务器配置未保存，请检查地址和密钥。');
     if (!syncImported) {
       if (current?.app_password?.state !== 'ready') {
         syncFeedback('正在配置应用专用密码…');
@@ -1615,6 +1664,7 @@ $('serverSyncForm').addEventListener('submit', async event => {
       $('serverSyncOTPRow').hidden = false; $('serverSyncOTP').required = true;
       $('serverSyncSubmit').textContent = '验证并完成';
       syncFeedback(result.message || '请输入受信任设备上的六位验证码');
+      syncResult(account, '同步尚待验证');
       return;
     }
     if (!result.ok || result.server_login?.state !== 'ready') {
@@ -1624,10 +1674,18 @@ $('serverSyncForm').addEventListener('submit', async event => {
     }
     await api('sync-recovery', {profile_id:profile.id,url:profile.url,enabled:recoveryEnabled});
     if (!sameSession()) return;
+    completed = true;
+    syncResult(account, '已同步到服务器');
     $('serverSyncDialog').close();
     notice(result.message || 'Web、IMAP 和 Apple 新通道均已就绪');
-  } catch (error) { if (sameSession()) syncFeedback(error.message, true); }
+  } catch (error) {
+    if (sameSession()) {
+      syncFeedback(error.message, true);
+      syncResult(account, error.message, true);
+    }
+  }
   finally {
+    if (!completed && !sameSession() && selectedAccount === account) syncResult(account, '同步窗口已关闭，结果待核实。');
     busy = false; syncConfigLock(false);
     if (current) render(current);
     if (sameSession() && syncPending) $('serverSyncOTP').focus();
