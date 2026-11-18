@@ -129,6 +129,7 @@ function clearCode() {
   privateCode = '';
   privateCodeKind = '';
   hideAt = 0;
+  $('codeCardTitle').textContent = '验证码';
   $('codeDisplay').classList.remove('shown');
   renderCodeSlots(['•', '•', '•', '•', '•', '•']);
   $('codeTimerFill')?.setAttribute('width', '0');
@@ -144,6 +145,7 @@ function codeIdleMessage(view) {
 function showCode(result) {
   privateCode = result.code;
   privateCodeKind = result.code_kind || '';
+  $('codeCardTitle').textContent = privateCodeKind === 'circle' ? '设备配对码' : '登录验证码';
   hideAt = new Date(result.hide_at).getTime();
   if (!Number.isFinite(hideAt)) hideAt = Date.now() + 60000;
   codeTotalMs = Math.max(1000, hideAt - Date.now());
@@ -844,13 +846,22 @@ function render(view) {
     code_exchanged: '配对证明已通过，已交换本机验证码；等待官方客户端结果。',
     exchange_complete_no_voucher: '验证码交换已完成。本机没有加密数据的信任凭据；官方验证结果仍需核实。',
     request_rejected: '配对请求参数未通过校验，尚未批准。',
-    exchange_failed: '配对交换未完成，账户会话保留。',
+    exchange_failed: '本次配对未完成。',
+    exchange_session_missing: '未找到这次请求对应的已批准配对。',
+    exchange_account_mismatch: '配对请求的账号与当前账号不一致。',
+    exchange_response_failed: '本机无法处理这一步的配对请求。',
+    exchange_send_failed: '本机未能发送配对响应。',
+    exchange_commit_failed: '配对响应已发出，本机未能确认这一步已完成。',
     interrupted: '推送连接变化，原配对事务已终止，请重新发起验证。'
   };
   const capabilities = [];
+  const pairingFailed = ['exchange_failed', 'exchange_session_missing', 'exchange_account_mismatch', 'exchange_response_failed', 'exchange_send_failed', 'exchange_commit_failed', 'request_rejected', 'interrupted'].includes(status.pairing_state);
+  if (privateCodeKind === 'circle' && status.pairing_state !== 'awaiting_client_proof') clearCode();
   if (status.push_issue === 'token_changed') capabilities.push('推送凭据已变化，请停止后台后重新连接，以更新设备登记。');
   if (status.pairing_state) capabilities.push(pairingStates[status.pairing_state] || '正在处理客户端配对。');
   else if (status.pairing_unsupported) capabilities.push('后台是旧版本，尚不支持客户端配对，请更新并重启后台。');
+  if (pairingFailed) capabilities.push('请在 iPhone 上重新发起配对。如果登录页提供“没有收到验证码？”，也可选择短信或电话验证。');
+  $('capabilityNotice').classList.toggle('error', pairingFailed);
   $('capabilityNotice').hidden = !capabilities.length;
   $('capabilityNotice').textContent = capabilities.join(' ');
 

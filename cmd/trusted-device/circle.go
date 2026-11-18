@@ -88,10 +88,10 @@ func (m *circleManager) handle(e aps.Event, send circleSender, code func() (stri
 	m.expire()
 	r := m.records[e.CircleTransactionID]
 	if r == nil || !r.approved {
-		return "", errors.New("circle: no approved session for this message")
+		return "exchange_session_missing", errors.New("circle: no approved session for this message")
 	}
 	if e.AccountID != "" && e.AccountID != m.account {
-		return "", errors.New("circle: notification account mismatch")
+		return "exchange_account_mismatch", errors.New("circle: notification account mismatch")
 	}
 	// Follow-up Circle notices need not repeat adsid. Bind them to the already
 	// approved transaction; never infer an account for an unsolicited first step.
@@ -100,13 +100,13 @@ func (m *circleManager) handle(e aps.Event, send circleSender, code func() (stri
 	}
 	response, err := r.session.Prepare(circleMessage(e), code)
 	if err != nil {
-		return "", err
+		return "exchange_response_failed", err
 	}
 	if err = send(e, response); err != nil {
-		return "", err
+		return "exchange_send_failed", err
 	}
 	if err = r.session.Commit(response.Step); err != nil {
-		return "", err
+		return "exchange_commit_failed", err
 	}
 	if e.CircleStep == 5 {
 		return "exchange_complete_no_voucher", nil

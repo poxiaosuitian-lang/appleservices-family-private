@@ -99,6 +99,24 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     view.code_ready = true; await render();
     assert(await page.locator('#codeButton').isDisabled());
     view.status = {pid:1,running:true,authenticated:true,state:'online'}; await render();
+    view.status.pairing_state = 'awaiting_client_proof'; await render();
+    await page.evaluate(() => showCode({code:'123456',code_kind:'circle'}));
+    assert.equal(await page.locator('#codeCardTitle').innerText(),'设备配对码');
+    await render();
+    assert(await page.locator('#copyButton').isEnabled());
+    for (const state of ['exchange_failed','exchange_send_failed']) {
+      view.status.pairing_state = state; await render();
+      assert.equal(await page.evaluate(() => privateCode),'');
+      assert(await page.locator('#copyButton').isDisabled());
+      assert(await page.locator('#capabilityNotice.error').isVisible());
+      assert.match(await page.locator('#capabilityNotice').innerText(),/iPhone/);
+    }
+    await page.evaluate(() => showCode({code:'123456'}));
+    await render();
+    assert.equal(await page.locator('#codeCardTitle').innerText(),'登录验证码');
+    assert(await page.locator('#copyButton').isEnabled());
+    await page.evaluate(() => clearCode());
+    delete view.status.pairing_state; await render();
     assert(await page.locator('#reloginButton').isEnabled());
     await page.evaluate(() => { busy = true; render(current); });
     assert(await page.locator('#reloginButton').isDisabled());

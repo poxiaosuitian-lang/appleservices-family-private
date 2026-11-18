@@ -1763,11 +1763,10 @@ func run() (runErr error) {
 					}
 				} else {
 					phase, err := circles.handle(event, sendCircle, freshCircleCode)
+					status.PairingState = phase
 					if err != nil {
-						status.PairingState = "exchange_failed"
-						fmt.Fprintln(os.Stderr, "Circle exchange failed; account session retained.")
+						fmt.Fprintln(os.Stderr, "Circle exchange failed:", phase)
 					} else {
-						status.PairingState = phase
 						fmt.Fprintln(os.Stderr, "Circle progress:", phase)
 					}
 				}
