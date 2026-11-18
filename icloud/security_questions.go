@@ -26,6 +26,7 @@ type SecurityQuestionStatus struct {
 	Saved bool `json:"saved"`
 }
 type SecurityQuestionsStatus struct {
+	BirthdaySaved bool                     `json:"birthday_saved"`
 	Questions     []SecurityQuestionStatus `json:"questions"`
 	Blocked       bool                     `json:"blocked"`
 	BlockedReason string                   `json:"blocked_reason,omitempty"`

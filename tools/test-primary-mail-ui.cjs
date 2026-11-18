@@ -25,13 +25,21 @@ const web = path.join(__dirname, '../internal/dashboard/web');
         }
         if (action === 'security-save') {
           const body = route.request().postDataJSON();
-          assert.deepEqual(body.security_answers,[{id:136,answer:'synthetic-private-answer'}]);
-          assert.equal(await page.locator('#securityQuestionsFields input').inputValue(),'');
-          view.security_questions.questions[0].saved = true;
+          if (body.security_birthday) {
+            assert.equal(body.security_birthday, '2000-02-29');
+            assert.deepEqual(body.security_answers, []);
+            assert.equal(await page.locator('#securityBirthday').inputValue(), '');
+            view.security_questions.birthday_saved = true;
+          } else {
+            assert.deepEqual(body.security_answers,[{id:136,answer:'synthetic-private-answer'}]);
+            assert.equal(await page.locator('#securityQuestionsFields input[data-question-id]').inputValue(),'');
+            view.security_questions.questions[0].saved = true;
+          }
           return route.fulfill({json:{ok:true,message:'已加密保存'}});
         }
         if (action === 'security-clear') {
           view.security_questions.questions[0].saved = false;
+          view.security_questions.birthday_saved = false;
           return route.fulfill({json:{ok:true,message:'已清除'}});
         }
         view.primary_mail = {phase:'ready',email:'fixture@icloud.com',message:'iCloud 主邮箱已存在，无需重复创建',auto_create:true};
@@ -74,15 +82,28 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     view.security_questions = {questions:[{id:136,question:'Fixture question?',saved:false}],blocked:false};
     view.primary_mail.auto_create = true;
     await refresh();
-    await page.locator('#securityQuestionsFields input').fill('synthetic-private-answer');
+    await page.locator('#securityQuestionsFields input[data-question-id]').fill('synthetic-private-answer');
     await page.locator('#securityQuestionsSave').click();
     await page.waitForFunction(() => !busy && document.getElementById('securityQuestionsFields').textContent.includes('已加密保存'));
     assert.deepEqual(calls,['mail-check','mail-ensure','security-save','mail-ensure']);
-    assert.equal(await page.locator('#securityQuestionsFields input').inputValue(),'');
+    assert.equal(await page.locator('#securityQuestionsFields input[data-question-id]').inputValue(),'');
     assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes('synthetic-private-answer')),false);
     await page.locator('#securityQuestionsClear').click();
     await page.waitForFunction(() => document.getElementById('securityQuestionsClear').disabled);
     assert.equal(calls.at(-1),'security-clear');
+    // A birthday can be saved alone, including before Apple returns questions.
+    view.security_questions.questions = [];
+    await refresh();
+    const beforeBirthday = calls.length;
+    await page.locator('#securityBirthday').fill('2000-02-29');
+    await page.locator('#securityQuestionsSave').click();
+    await page.waitForFunction(() => !busy && current.security_questions.birthday_saved);
+    assert.deepEqual(calls.slice(beforeBirthday), ['security-save']);
+    assert.equal(await page.locator('#securityBirthday').inputValue(), '');
+    assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes('2000-02-29')), false);
+    await refresh();
+    assert.match(await page.locator('#securityBirthday').locator('..').innerText(), /已加密保存/);
+    view.security_questions.questions = [{id:136,question:'Fixture question?',saved:false}];
     view.security_questions.blocked = true;
     view.security_questions.blocked_reason = 'additional-verification';
     await refresh();
@@ -90,11 +111,14 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await page.locator('#securityQuestionsRead').click();
     await page.waitForFunction(() => !busy && !current.security_questions.blocked);
     assert.deepEqual(calls.slice(-2),['security-resume','mail-check']);
-    await page.locator('#securityQuestionsFields input').fill('draft-private-answer');
-    await page.evaluate(() => { selectedAccount = 'another-fixture'; render({...current, security_questions:null}); });
-    assert.equal(await page.locator('#securityQuestionsFields input').count(),0);
+    await page.locator('#securityQuestionsFields input[data-question-id]').fill('draft-private-answer');
+    await page.locator('#securityBirthday').fill('2000-02-29');
+    await page.evaluate(() => render({...current, selected:'another-fixture', security_questions:null}));
+    assert.equal(await page.locator('#securityQuestionsFields input[data-question-id]').count(),0);
+    assert.equal(await page.locator('#securityBirthday').inputValue(), '');
     await page.setViewportSize({width:390,height:844});
     assert(await page.locator('#primaryMailSummary').isVisible());
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.deepEqual(errors,[]);
     console.log('PASS: mailbox states and encrypted-answer UI; save/continue/clear; no answer retention or cross-account drafts (offline)');
   } finally { await browser.close(); }

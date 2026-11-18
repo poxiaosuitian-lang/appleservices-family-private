@@ -706,7 +706,7 @@ func run() (runErr error) {
 	}
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
-	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer) control.Result {
+	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer, birthday string) control.Result {
 		if action == "hme-server-web-recover" {
 			var payload hmesync.WebRecoveryPayload
 			if json.Unmarshal([]byte(commandLabel), &payload) != nil || payload.SourceID != hmesync.SourceID(appleID) {
@@ -826,10 +826,10 @@ func run() (runErr error) {
 			return control.Result{OK: true, Message: "已允许再次检查安全验证", Stage: "security-questions"}
 		}
 		if action == "security-save" || action == "security-clear" {
-			if err := securityAnswers.update(answers, action == "security-clear"); err != nil {
+			if err := securityAnswers.updateWithBirthday(answers, birthday, action == "security-clear"); err != nil {
 				return control.Result{Message: err.Error(), Stage: "security-questions"}
 			}
-			return control.Result{OK: true, Message: "安全问题答案已使用 Windows 本机加密更新", Stage: "security-questions"}
+			return control.Result{OK: true, Message: "安全验证资料已使用 Windows 本机加密更新", Stage: "security-questions"}
 		}
 		if action == "mail-check" || action == "mail-ensure" {
 			mailClient, mailErr := icloud.NewPrimaryMailClient(*dir, appleID)
@@ -1604,15 +1604,15 @@ func run() (runErr error) {
 	for {
 		select {
 		case <-autoAppPassword:
-			performAction(ctx, "app-password-auto", "", "", "", "", nil)
+			performAction(ctx, "app-password-auto", "", "", "", "", nil, "")
 		case <-autoHMEForward:
 			// Run after replying to the verified purchase, so web authentication
 			// cannot turn a completed subscription into an HTTP timeout.
-			performAction(ctx, "hme-auto-forward", "", "", "", "", nil)
+			performAction(ctx, "hme-auto-forward", "", "", "", "", nil, "")
 		case <-autoMail:
 			autoMail = nil // once per successful connection; no polling/retry loop
 			if task, err := mailsetup.Load(*dir, appleID); err == nil && task.Phase != "ready" {
-				performAction(ctx, "mail-ensure", "", "", "", "", nil)
+				performAction(ctx, "mail-ensure", "", "", "", "", nil, "")
 			}
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) || (*listenFor > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
@@ -1700,7 +1700,7 @@ func run() (runErr error) {
 				command.Reply <- control.Result{Message: "请重新查看当前登录请求"}
 				continue
 			}
-			result := performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers)
+			result := performAction(command.Context, command.Action.Action, command.RequestID, command.Code, command.Label, command.Note, command.SecurityAnswers, command.SecurityBirthday)
 			queueHMEForwardAfterPurchase(result, autoAppPassword)
 			command.Reply <- result
 		case <-renewalRecovery.channel():
@@ -1804,7 +1804,7 @@ func run() (runErr error) {
 			if choice != "devices" && choice != "refresh" && choice != "code" && choice != "allow" && choice != "deny" {
 				continue
 			}
-			result := performAction(ctx, choice, "", "", "", "", nil)
+			result := performAction(ctx, choice, "", "", "", "", nil, "")
 			if result.Code != "" {
 				fmt.Println("Apple verification code:", result.Code)
 			} else {

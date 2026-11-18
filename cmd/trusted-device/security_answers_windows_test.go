@@ -103,3 +103,82 @@ func TestSecurityAnswersEncryptedBoundAndReused(t *testing.T) {
 		t.Fatal("tampered ciphertext accepted")
 	}
 }
+
+func TestSecurityBirthdayEncryptedAndIndependentOfQuestionVerification(t *testing.T) {
+	f := fileStore{dir: t.TempDir()}
+	if err := f.SaveSession(&appleservices.Session{AppleID: "owner@example.test", DSID: "synthetic-adid"}); err != nil {
+		t.Fatal(err)
+	}
+	p := accountSecurityAnswers{store: f, appleID: "owner@example.test"}
+	const birthday = "2000-02-29"
+	if err := p.updateWithBirthday(nil, birthday, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.load()
+	if err != nil || got.Birthday != birthday || !securityAnswersStatus(got).BirthdaySaved {
+		t.Fatal("birthday was not restored")
+	}
+	for _, name := range []string{"security-answers.dpapi", "security-birthday.dpapi", "security-questions-status.json"} {
+		data, err := os.ReadFile(filepath.Join(f.dir, name))
+		if err != nil || bytes.Contains(data, []byte(birthday)) {
+			t.Fatal("birthday missing or exposed in plaintext")
+		}
+	}
+	for _, invalid := range []string{"2001-02-29", "2000/2/29", "1899-12-31", "9999-01-01"} {
+		if err := p.updateWithBirthday(nil, invalid, false); err == nil {
+			t.Fatal("invalid birthday accepted")
+		}
+	}
+	questions := []icloud.SecurityQuestion{{ID: 136, Question: "Fixture?"}}
+	_, _ = p.Answers(context.Background(), questions)
+	if err := p.update([]icloud.SecurityQuestionAnswer{{ID: 136, Answer: "synthetic-answer"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Pause(context.Background(), "rejected"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.updateWithBirthday(nil, "2000-03-01", false); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.load()
+	if err != nil || !got.Blocked || got.Entries[0].Answer != "synthetic-answer" || got.Birthday != "2000-03-01" {
+		t.Fatal("birthday edit changed verification guard or answers")
+	}
+	// An old worker can rewrite its answer file without erasing the new field.
+	plain, _ := json.Marshal(protectedSecurityAnswers{Version: 1, AppleID: p.appleID, ADSID: "synthetic-adid"})
+	encrypted, err := protectStoreData(plain, securityAnswersEntropy(p.appleID, "synthetic-adid"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONFile(filepath.Join(f.dir, "security-answers.dpapi"), encrypted); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.load()
+	if err != nil || got.Birthday != "2000-03-01" {
+		t.Fatal("old answer writer erased birthday")
+	}
+	// Even a valid answer record cannot decrypt a different account's birthday.
+	otherDir := t.TempDir()
+	otherStore := fileStore{dir: otherDir}
+	if err := otherStore.SaveSession(&appleservices.Session{AppleID: "other@example.test", DSID: "other-adid"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(f.dir, "security-birthday.dpapi"))
+	if err := os.WriteFile(filepath.Join(otherDir, "security-birthday.dpapi"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	other := accountSecurityAnswers{store: otherStore, appleID: "other@example.test"}
+	if _, err := other.load(); err == nil {
+		t.Fatal("cross-account birthday decrypted")
+	}
+	if err := p.update(nil, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.load()
+	if err != nil || got.Birthday != "" || securityAnswersStatus(got).BirthdaySaved {
+		t.Fatal("clear retained birthday")
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "security-birthday.dpapi")); !os.IsNotExist(err) {
+		t.Fatal("clear retained ciphertext")
+	}
+}

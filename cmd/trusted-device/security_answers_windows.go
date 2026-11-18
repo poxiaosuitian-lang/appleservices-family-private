@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Laky-64/appleservices/icloud"
 )
@@ -24,6 +25,7 @@ type protectedSecurityAnswers struct {
 	Entries        []savedSecurityAnswer
 	Blocked        bool
 	BlockedReason  string
+	Birthday       string `json:"-"`
 }
 type accountSecurityAnswers struct {
 	store   fileStore
@@ -41,7 +43,8 @@ func (p accountSecurityAnswers) load() (*protectedSecurityAnswers, error) {
 	}
 	data, err := os.ReadFile(filepath.Join(p.store.dir, "security-answers.dpapi"))
 	if os.IsNotExist(err) {
-		return &protectedSecurityAnswers{Version: 1, AppleID: s.AppleID, ADSID: s.DSID}, nil
+		saved := &protectedSecurityAnswers{Version: 1, AppleID: s.AppleID, ADSID: s.DSID}
+		return saved, p.loadBirthday(saved)
 	}
 	if err != nil {
 		return nil, errors.New("无法读取加密安全问题")
@@ -59,10 +62,39 @@ func (p accountSecurityAnswers) load() (*protectedSecurityAnswers, error) {
 	if json.Unmarshal(plain, &saved) != nil || saved.Version != 1 || !strings.EqualFold(saved.AppleID, p.appleID) || saved.ADSID != s.DSID || len(saved.Entries) > 24 {
 		return nil, errors.New("安全问题账号绑定已改变")
 	}
-	return &saved, nil
+	return &saved, p.loadBirthday(&saved)
 }
+
+// Keep the new field in a separate encrypted record so an older running
+// worker updating question answers cannot discard the saved birthday.
+func (p accountSecurityAnswers) loadBirthday(s *protectedSecurityAnswers) error {
+	data, err := os.ReadFile(filepath.Join(p.store.dir, "security-birthday.dpapi"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	var encrypted []byte
+	if err != nil || len(data) > 4096 || json.Unmarshal(data, &encrypted) != nil {
+		return errors.New("无法读取加密生日")
+	}
+	plain, err := protectStoreData(encrypted, securityAnswersEntropy(p.appleID, s.ADSID), true)
+	if err != nil {
+		return errors.New("无法解密本账号生日")
+	}
+	defer clear(plain)
+	date, err := time.Parse("2006-01-02", string(plain))
+	if err != nil || date.Year() < 1900 || date.After(time.Now()) {
+		return errors.New("加密生日格式无效")
+	}
+	s.Birthday = string(plain)
+	return nil
+}
+
 func (p accountSecurityAnswers) save(s *protectedSecurityAnswers) error {
-	plain, err := json.Marshal(s)
+	// The answer record stays compatible with old workers; the birthday uses
+	// the same Apple ID / DSID binding in its own DPAPI record.
+	answers := *s
+	answers.Birthday = ""
+	plain, err := json.Marshal(&answers)
 	if err != nil {
 		return err
 	}
@@ -74,6 +106,19 @@ func (p accountSecurityAnswers) save(s *protectedSecurityAnswers) error {
 	if err = writeJSONFile(filepath.Join(p.store.dir, "security-answers.dpapi"), encrypted); err != nil {
 		return err
 	}
+	if s.Birthday != "" {
+		birthday := []byte(s.Birthday)
+		defer clear(birthday)
+		protected, err := protectStoreData(birthday, securityAnswersEntropy(p.appleID, s.ADSID), false)
+		if err != nil {
+			return errors.New("无法加密生日")
+		}
+		if err := writeJSONFile(filepath.Join(p.store.dir, "security-birthday.dpapi"), protected); err != nil {
+			return errors.New("无法保存加密生日")
+		}
+	} else if err := os.Remove(filepath.Join(p.store.dir, "security-birthday.dpapi")); err != nil && !os.IsNotExist(err) {
+		return errors.New("无法清除加密生日")
+	}
 	// Only the UI-safe question catalog/status is written outside DPAPI.
 	return writeJSONFile(filepath.Join(p.store.dir, "security-questions-status.json"), struct {
 		AppleID string                         `json:"apple_id"`
@@ -81,7 +126,7 @@ func (p accountSecurityAnswers) save(s *protectedSecurityAnswers) error {
 	}{p.appleID, securityAnswersStatus(s)})
 }
 func securityAnswersStatus(s *protectedSecurityAnswers) icloud.SecurityQuestionsStatus {
-	status := icloud.SecurityQuestionsStatus{Blocked: s.Blocked, BlockedReason: s.BlockedReason, Questions: []icloud.SecurityQuestionStatus{}}
+	status := icloud.SecurityQuestionsStatus{BirthdaySaved: s.Birthday != "", Blocked: s.Blocked, BlockedReason: s.BlockedReason, Questions: []icloud.SecurityQuestionStatus{}}
 	for _, e := range s.Entries {
 		status.Questions = append(status.Questions, icloud.SecurityQuestionStatus{SecurityQuestion: e.Question, Saved: e.Answer != ""})
 	}
@@ -158,11 +203,22 @@ func (p accountSecurityAnswers) resume() error {
 	return p.save(s)
 }
 func (p accountSecurityAnswers) update(answers []icloud.SecurityQuestionAnswer, forget bool) error {
+	return p.updateWithBirthday(answers, "", forget)
+}
+
+func (p accountSecurityAnswers) updateWithBirthday(answers []icloud.SecurityQuestionAnswer, birthday string, forget bool) error {
+	if birthday != "" {
+		date, err := time.Parse("2006-01-02", birthday)
+		if err != nil || date.Year() < 1900 || date.After(time.Now()) {
+			return errors.New("请输入有效的出生日期（年-月-日）")
+		}
+	}
 	s, err := p.load()
 	if err != nil {
 		return err
 	}
 	if forget {
+		s.Birthday = ""
 		for i := range s.Entries {
 			s.Entries[i].Answer = ""
 		}
@@ -170,8 +226,15 @@ func (p accountSecurityAnswers) update(answers []icloud.SecurityQuestionAnswer, 
 		s.BlockedReason = ""
 		return p.save(s)
 	}
-	if len(answers) == 0 || len(answers) > 24 {
-		return errors.New("请填写需要保存的答案")
+	if (len(answers) == 0 && birthday == "") || len(answers) > 24 {
+		return errors.New("请填写需要保存的答案或生日")
+	}
+	if birthday != "" {
+		s.Birthday = birthday
+	}
+	// Saving a birthday must not resume rejected or ambiguous question answers.
+	if len(answers) == 0 {
+		return p.save(s)
 	}
 	seen := map[int]bool{}
 	changed := false

@@ -57,7 +57,7 @@ func (s fileStore) LoadSession() (*appleservices.Session, error) {
 
 func (s fileStore) SaveSession(sess *appleservices.Session) error {
 	if sess == nil {
-		for _, name := range []string{"security-answers.dpapi", "security-questions-status.json"} {
+		for _, name := range []string{"security-answers.dpapi", "security-birthday.dpapi", "security-questions-status.json"} {
 			if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !os.IsNotExist(err) {
 				return err
 			}

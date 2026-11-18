@@ -82,6 +82,15 @@ async function scenario(browser, {paid=0, discovered=paid, prepareOK=true, purch
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
   try{
     const checks=['storage-info','storage-plan','storage-purchase-prepare-us'];
+    for (const discovered of [0,50]) {
+      await scenario(browser,{discovered},async(p,c)=>{
+        await p.locator('#subscriptionStatusButton').click();
+        await p.waitForFunction(()=>!busy && !subscriptionStatusLoading);
+        assert.deepEqual(c,['storage-info']); // Explicit status lookup never purchases or generates credentials.
+        assert.match(await p.locator('#purchaseAvailability').innerText(), discovered ? /iCloud\+ 已开通/ : /个人 iCloud\+ 未开通/);
+        assert(await p.locator('#subscriptionStatusButton').isEnabled());
+      });
+    }
     await scenario(browser,{},async(p,c)=>{
       for(const id of ['planButton','storeAuthButton','paymentCheckButton']) assert.equal(await p.locator('#'+id).count(),0);
       assert.equal(await p.locator('#purchaseButton').innerText(),'开通 iCloud+ · 50GB');

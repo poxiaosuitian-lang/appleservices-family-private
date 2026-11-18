@@ -49,12 +49,13 @@ type View struct {
 	Capabilities      []string        `json:"capabilities,omitempty"`
 }
 type Action struct {
-	SecurityAnswers []icloud.SecurityQuestionAnswer `json:"security_answers,omitempty"`
-	Action          string                          `json:"action"`
-	Code            string                          `json:"code,omitempty"`
-	RequestID       string                          `json:"request_id,omitempty"`
-	Label           string                          `json:"label,omitempty"`
-	Note            string                          `json:"note,omitempty"`
+	SecurityBirthday string                          `json:"security_birthday,omitempty"`
+	SecurityAnswers  []icloud.SecurityQuestionAnswer `json:"security_answers,omitempty"`
+	Action           string                          `json:"action"`
+	Code             string                          `json:"code,omitempty"`
+	RequestID        string                          `json:"request_id,omitempty"`
+	Label            string                          `json:"label,omitempty"`
+	Note             string                          `json:"note,omitempty"`
 }
 type Result struct {
 	ServerLogin         *hmesync.LoginResult            `json:"server_login,omitempty"`

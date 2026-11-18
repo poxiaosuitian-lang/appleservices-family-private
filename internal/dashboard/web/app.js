@@ -4,6 +4,7 @@ let loginMode = 'reconnect', loginAccount = '', current = null, busy = false, pr
 let storeAuthReady = false, storeAuthAccount = '', storeAuthPID = 0, storeAuthRefresh = '';
 let giftOwner = '', giftPID = 0;
 let purchaseFlowRunning = false;
+let subscriptionStatusLoading = false;
 let verificationContext = '';
 let appPasswordOwner = '', appPasswordPID = 0;
 let serverSyncAccount = '', serverSyncPID = 0;
@@ -699,7 +700,7 @@ function renderAppPassword(view, online) {
 let securityQuestionsKey = '';
 function renderSecurityQuestions(view, ready) {
   const status = view.security_questions, questions = status?.questions || [];
-  const key = JSON.stringify([selectedAccount, questions]);
+  const key = JSON.stringify([selectedAccount, view.status?.pid, questions, !!status?.birthday_saved]);
   if (key !== securityQuestionsKey) {
     securityQuestionsKey = key;
     const fields = $('securityQuestionsFields');
@@ -711,13 +712,18 @@ function renderSecurityQuestions(view, ready) {
       input.dataset.questionId = String(question.id); input.placeholder = question.saved ? '留空保留原答案' : '填写此问题的答案';
       label.append(caption, input); fields.append(label);
     }
+    const label = document.createElement('label'), caption = document.createElement('span'), input = document.createElement('input');
+    caption.textContent = status?.birthday_saved ? '生日（已加密保存，留空保留）' : '生日';
+    input.type = 'date'; input.id = 'securityBirthday'; input.autocomplete = 'off'; input.min = '1900-01-01';
+    input.max = new Date().toLocaleDateString('sv-SE');
+    label.append(caption, input); fields.append(label);
   }
   $('securityQuestionsSummary').textContent = status?.blocked ? (status.blocked_reason === 'rejected' ? 'Apple 未接受上次答案，已暂停自动提交。请修正答案后保存。' : status.blocked_reason === 'additional-verification' ? '答案已加密保存，Apple 仍要求后续安全验证。请在 Apple 账户页面完成后，点击读取验证问题继续。' : '上次安全验证未完成，已暂停自动提交。请检查账号状态后再点击读取验证问题。')
     : questions.length ? '已保存 ' + questions.filter(q => q.saved).length + ' / ' + questions.length + ' 个答案'
     : '';
   $('securityQuestionsRead').disabled = busy || !ready;
-  $('securityQuestionsSave').disabled = busy || !ready || !questions.length;
-  $('securityQuestionsClear').disabled = busy || !ready || !questions.some(q => q.saved);
+  $('securityQuestionsSave').disabled = busy || !ready;
+  $('securityQuestionsClear').disabled = busy || !ready || (!questions.some(q => q.saved) && !status?.birthday_saved);
   $('securityQuestionsFields').querySelectorAll('input').forEach(input => { input.disabled = busy || !ready; });
 }
 
@@ -869,6 +875,8 @@ function render(view) {
   $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online;
   $('devicesButton').disabled = busy || !online || !view.control_ready;
   $('storageButton').disabled = busy || storageRefreshing || (!activated && (!online || !view.control_ready));
+  $('subscriptionStatusButton').disabled = $('storageButton').disabled;
+  $('subscriptionStatusButton').textContent = subscriptionStatusLoading ? '正在查询…' : '查询当前状态';
   $('purchaseButton').disabled = busy || purchaseFlowRunning || !online || !view.control_ready || hasPaidStorage(view);
 
   if (hasPaidStorage(view)) {
@@ -879,7 +887,7 @@ function render(view) {
 
   const cloudHint = hasPaidStorage(view) ? 'iCloud+ 已开通 · ' + gib(view.storage.paid_bytes) : !online ? '账户未在线' : !view.control_ready ? '等待后台连接' : busy ? '正在处理…' : !purchaseAction ? '点击开通以检查 50GB 方案' : purchaseAction === 'storage-skill-purchase-us' && !storeAuthReady ? '可开通 · ' + purchaseLabel : '报价已核验 · ' + purchaseLabel;
   $('icloudAccessHint').textContent = cloudHint;
-  $('purchaseAvailability').textContent = cloudHint;
+  $('purchaseAvailability').textContent = subscriptionStatusLoading ? '正在查询…' : hasPaidStorage(view) ? 'iCloud+ 已开通 · ' + gib(view.storage.paid_bytes) : view.storage && !view.storage_stale ? '个人 iCloud+ 未开通 · 总容量 ' + gib(view.storage.total_bytes) : cloudHint;
   $('icloudLoginLink').hidden = online;
   $('purchaseButton').title = $('purchaseButton').disabled ? cloudHint : '确认开通 iCloud+ 50GB';
 
@@ -1107,7 +1115,7 @@ async function action(name, extra = {}, options = {}) {
       storeAuthAccount = selectedAccount;
       $('storeAuthSummary').textContent = '购买会话已认证';
     }
-    if (result.storage) {
+    if (result.storage && actionAccount === selectedAccount) {
       const checkedAt = new Date().toISOString();
       if (current) { current.storage = result.storage; current.storage_checked_at = checkedAt; current.storage_stale = false; }
       renderStorage(result.storage, { checkedAt, stale: false });
@@ -1188,6 +1196,20 @@ $('appPasswordForm').addEventListener('submit', async event => {
   if (!code || !enabled || current?.selected !== selectedAccount) return;
   await action('app-password-save', {code});
 });
+$('subscriptionStatusButton').addEventListener('click', async () => {
+  if ($('subscriptionStatusButton').disabled || subscriptionStatusLoading) return;
+  const account = selectedAccount;
+  subscriptionStatusLoading = true;
+  try {
+    const result = await action('storage-info');
+    if (result?.ok && result.storage && selectedAccount === account) {
+      notice(result.storage.paid_bytes > 0 ? 'iCloud+ 已开通 · ' + gib(result.storage.paid_bytes) : '个人 iCloud+ 未开通 · 总容量 ' + gib(result.storage.total_bytes));
+    }
+  } finally {
+    subscriptionStatusLoading = false;
+    if (current) render(current);
+  }
+});
 $('securityQuestionsRead').addEventListener('click', async () => {
   const account = selectedAccount;
   if (current?.security_questions?.blocked && current.security_questions.blocked_reason !== 'rejected') {
@@ -1204,14 +1226,15 @@ $('securityQuestionsForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (busy) return;
   const account = selectedAccount, autoCreate = !!current?.primary_mail?.auto_create;
-  const answers = [...document.querySelectorAll('#securityQuestionsFields input')]
+  let birthday = $('securityBirthday').value;
+  const answers = [...document.querySelectorAll('#securityQuestionsFields input[data-question-id]')]
     .filter(input => input.value.trim()).map(input => ({id:Number(input.dataset.questionId), answer:input.value}));
-  if (!answers.length) { notice('请填写需要保存或修改的答案', true); return; }
+  if (!answers.length && !birthday) { notice('请填写需要保存的答案或生日', true); return; }
   document.querySelectorAll('#securityQuestionsFields input').forEach(input => { input.value = ''; });
   try {
-    const result = await action('security-save', {security_answers:answers});
-    if (result?.ok && account === selectedAccount) await action(autoCreate ? 'mail-ensure' : 'mail-check');
-  } finally { answers.forEach(answer => { answer.answer = ''; }); }
+    const result = await action('security-save', {security_answers:answers, security_birthday:birthday});
+    if (result?.ok && answers.length && account === selectedAccount) await action(autoCreate ? 'mail-ensure' : 'mail-check');
+  } finally { birthday = ''; answers.forEach(answer => { answer.answer = ''; }); }
 });
 $('activationCheckButton').addEventListener('click', () => action('activation-plan'));
 $('activationAcceptButton').addEventListener('click', () => {
