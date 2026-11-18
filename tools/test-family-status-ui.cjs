@@ -62,6 +62,20 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert.equal(await page.locator('#accountList .account-role').count(), 0);
     assert.equal(await page.locator('#familyRole').textContent(), '未加入');
     assert.equal(await page.locator('#familyRemoveControls').evaluate(e => e.hidden), true);
+    // Subscription changes must refresh the family card even when Apple's
+    // family response and timestamp have not changed.
+    view.accounts[0].icloud_plus = true;
+    await update();
+    assert.equal(await page.locator('#familyRole').textContent(), '母号');
+    assert.equal(await page.locator('#familySummary').textContent(), 'iCloud+ 母号 · 尚未组建家庭');
+    assert.equal(await page.locator('#familyStorageState').textContent(), '尚未共享');
+    assert.equal(await page.locator('#familyControls').evaluate(e => e.hidden), true);
+    assert.equal(await page.locator('#familyRemoveControls').evaluate(e => e.hidden), true);
+    assert.equal(await page.locator('#familyAddButton').isDisabled(), true);
+    view.accounts[0].icloud_plus = false;
+    await update();
+    assert.equal(await page.locator('#familyRole').textContent(), '未加入');
+    assert.equal(await page.locator('#familyControls').evaluate(e => e.hidden), false);
     // Missing/deleted organizers must never be resurrected from the selection cache.
     await page.evaluate(() => {poolOrganizerAccount='removed';poolOrganizerName='Old';});
     view.family = null; view.selected = 'child';

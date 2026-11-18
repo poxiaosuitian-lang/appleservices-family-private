@@ -287,7 +287,12 @@ function updateFamilyCacheMeta(checkedAt = '', stale = false, hasInfo = !!family
   $('familyRefreshButton').textContent = '刷新家庭状态';
 }
 
+let renderedFamilyMother = false;
+function selectedIsMother(view) {
+  return isMotherAccount(view?.accounts?.find(account => account.id === view.selected) || {});
+}
 function renderFamily(info, { checkedAt = '', stale = false, animate = true } = {}) {
+  renderedFamilyMother = current?.selected === selectedAccount && selectedIsMother(current);
   familyInfo = info || null;
   familyAccount = selectedAccount;
   const shell = $('familyCard'), card = $('familyStatus'), metrics = $('familyMetrics'), map = $('familyMap'), controls = $('familyControls'), removeControls = $('familyRemoveControls');
@@ -309,13 +314,18 @@ function renderFamily(info, { checkedAt = '', stale = false, animate = true } = 
     localStorage.setItem('family-organizer-name', poolOrganizerName);
   }
   metrics.hidden = false;
-  controls.hidden = !!info.member;
+  const standaloneMother = renderedFamilyMother && !info.member && !info.organizer;
+  controls.hidden = !!info.member || standaloneMother;
   removeControls.hidden = !info.organizer;
   map.hidden = !info.member;
   if (info.member) {
     card.classList.add(info.organizer ? 'organizer' : 'member');
     $('familySummary').textContent = info.organizer ? '当前账号是家庭母号' : '已加入家庭 · ' + info.members + ' 位成员';
     $('familyStatusChip').textContent = info.organizer ? '母号' : '家庭成员';
+  } else if (standaloneMother) {
+    card.classList.add('organizer');
+    $('familySummary').textContent = 'iCloud+ 母号 · 尚未组建家庭';
+    $('familyStatusChip').textContent = '母号';
   } else if (info.eligibility_known && info.eligible) {
     card.classList.add('eligible');
     $('familySummary').textContent = '尚未加入家庭 · 当前可加入';
@@ -325,8 +335,8 @@ function renderFamily(info, { checkedAt = '', stale = false, animate = true } = 
     $('familyStatusChip').textContent = '未确认';
   }
   $('familyMemberCount').textContent = info.members || '0';
-  $('familyRole').textContent = info.organizer ? '组织者' : info.member ? '成员' : '未加入';
-  $('familyStorageState').textContent = !info.storage_known ? '未返回' : info.storage_participating && info.storage_available && info.storage_enabled ? '已启用' : info.storage_available ? '可加入' : '未共享';
+  $('familyRole').textContent = info.organizer ? '组织者' : info.member ? '成员' : standaloneMother ? '母号' : '未加入';
+  $('familyStorageState').textContent = standaloneMother ? '尚未共享' : !info.storage_known ? '未返回' : info.storage_participating && info.storage_available && info.storage_enabled ? '已启用' : info.storage_available ? '可加入' : '未共享';
   $('familyStorageBytes').textContent = gib(info.storage_bytes);
   if (info.member) {
     const selected = current?.accounts?.find(account => account.id === selectedAccount);
@@ -737,7 +747,7 @@ function render(view) {
   selectedAccount = view.selected || selectedAccount;
   if (view.accounts) renderAccounts(view);
   if (view.family) {
-    const changed = familyAccount !== selectedAccount || !familyInfo || familyCheckedAt !== view.family_checked_at || JSON.stringify(familyInfo) !== JSON.stringify(view.family);
+    const changed = familyAccount !== selectedAccount || !familyInfo || renderedFamilyMother !== selectedIsMother(view) || familyCheckedAt !== view.family_checked_at || JSON.stringify(familyInfo) !== JSON.stringify(view.family);
     if (changed) renderFamily(view.family, { checkedAt: view.family_checked_at, stale: view.family_stale, animate: false });
     else updateFamilyCacheMeta(view.family_checked_at, view.family_stale, true);
   } else if (familyAccount === selectedAccount && familyInfo) renderFamily(null);
@@ -898,8 +908,8 @@ function render(view) {
   if (familyAccount && familyAccount !== selectedAccount) renderFamily(null);
   const selectedFamily = familyAccount === selectedAccount ? familyInfo : null;
   $('familyRefreshButton').disabled = busy || !activated;
-  $('familyOrganizer').disabled = busy || !online || !!selectedFamily?.member;
-  $('familyAddButton').disabled = busy || !online || !view.control_ready || !!selectedFamily?.member || !$('familyOrganizer').value;
+  $('familyOrganizer').disabled = busy || !online || !!selectedFamily?.member || selectedIsMother(view);
+  $('familyAddButton').disabled = busy || !online || !view.control_ready || !!selectedFamily?.member || selectedIsMother(view) || !$('familyOrganizer').value;
   $('familyJoinStorageButton').disabled = busy || !activated || !selectedFamily?.member || !selectedFamily?.storage_known || !selectedFamily?.storage_available || selectedFamily?.storage_participating;
   $('familyRemoveMember').disabled = busy || !selectedFamily?.organizer;
   $('familyRemoveButton').disabled = busy || !selectedFamily?.organizer || !$('familyRemoveMember').value;
