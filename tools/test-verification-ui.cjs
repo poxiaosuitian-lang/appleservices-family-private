@@ -10,7 +10,7 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     const errors = [], calls = [];
     let codeResponse;
-    let view = {selected:'fixture',account:'Fixture',accounts:[],status:{pid:1,running:true,authenticated:false,state:'awaiting_device_code',verification_required:true},control_ready:true,icloud_activated:true,code_ready:false};
+    let view = {selected:'fixture',account:'Fixture',login_account:'fixture@example.test',accounts:[{id:'fixture',name:'Fixture'}],status:{pid:1,running:true,authenticated:false,state:'awaiting_device_code',verification_required:true},control_ready:true,icloud_activated:true,code_ready:false};
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
@@ -46,6 +46,18 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert(await page.locator('#resendButton').isHidden());
     assert.deepEqual(calls,[]); // polling and rendering never generate or submit codes
 
+    // Waiting accounts can reopen their own login without stopping first.
+    assert(await page.locator('#reloginButton').isVisible());
+    assert(await page.locator('#reloginButton').isEnabled());
+    await page.locator('#reloginButton').click();
+    assert.equal(await page.evaluate(() => loginMode), 'reconnect');
+    assert.equal(await page.evaluate(() => loginAccount), 'fixture');
+    assert.equal(await page.locator('#appleID').inputValue(), 'fixture@example.test');
+    assert(await page.locator('#appleID').evaluate(input => input.readOnly));
+    assert.equal(await page.locator('#password').inputValue(), '');
+    assert.deepEqual(calls, []); // Opening the dialog does not stop or log in.
+    await page.locator('#closeLogin').click();
+
     view.status.local_verification = 'failed'; await render();
     assert.match(await page.locator('#smsPanel p').innerText(),/本机验证未完成/);
     assert.match(await page.locator('#codeDetail').innerText(),/本机验证未完成/);
@@ -80,11 +92,17 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert.equal(await page.locator('#authState').innerText(),'未登录');
     assert.match(await page.locator('#sessionTitle').innerText(),/登录未完成/);
     assert.match(await page.locator('#sessionDescription').innerText(),/本次登录未完成/);
+    assert(await page.locator('#reloginButton').isHidden());
+    assert(await page.locator('#startButton').isVisible());
 
     // Only a fully authenticated worker may expose a code, even if a stale view says ready.
     view.code_ready = true; await render();
     assert(await page.locator('#codeButton').isDisabled());
     view.status = {pid:1,running:true,authenticated:true,state:'online'}; await render();
+    assert(await page.locator('#reloginButton').isEnabled());
+    await page.evaluate(() => { busy = true; render(current); });
+    assert(await page.locator('#reloginButton').isDisabled());
+    await page.evaluate(() => { busy = false; render(current); });
     assert(await page.locator('#codeButton').isEnabled());
     view.control_ready = false; await render();
     assert(await page.locator('#codeButton').isDisabled());

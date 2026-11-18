@@ -854,6 +854,8 @@ function render(view) {
   $('startButton').hidden = running && !reconnectRequired;
   $('startButton').textContent = reconnectRequired || status.state === 'failed' ? '重新连接' : '连接账户';
   $('startButton').disabled = busy || starting;
+  $('reloginButton').hidden = !running || reconnectRequired;
+  $('reloginButton').disabled = busy || starting;
   $('renewButton').hidden = !online;
   $('renewButton').disabled = busy || !view.control_ready;
   $('stopButton').hidden = !status.running;
@@ -1364,6 +1366,9 @@ $('copyButton').addEventListener('click', async () => {
 $('allowButton').addEventListener('click', () => { if (current?.pending) action('allow', { request_id: current.pending.id }); });
 $('denyButton').addEventListener('click', () => { if (current?.pending) action('deny', { request_id: current.pending.id }); });
 $('startButton').addEventListener('click', () => openLogin('reconnect'));
+$('reloginButton').addEventListener('click', () => {
+  if (!$('reloginButton').disabled && current?.selected === selectedAccount) openLogin('reconnect');
+});
 $('closeLogin').addEventListener('click', () => { $('password').value = ''; $('loginDialog').close(); });
 $('loginDialog').addEventListener('close', () => { $('password').value = ''; });
 $('loginForm').addEventListener('submit', async event => {
