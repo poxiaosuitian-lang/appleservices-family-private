@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -153,5 +154,31 @@ func TestRuntimeAndStopAreBoundToProcess(t *testing.T) {
 	}
 	if !stopRequested(dir, 123) || stopRequested(dir, 123) {
 		t.Fatal("matching stop was not consumed exactly once")
+	}
+}
+
+type quotaCheckedLogin struct {
+	fakeMaintainedLogin
+	quotaErr error
+}
+
+func (l *quotaCheckedLogin) StorageInfo(context.Context) (*appleservices.StorageInfo, error) {
+	return &appleservices.StorageInfo{}, l.quotaErr
+}
+
+func TestRenewalChecksICloudWhenDeviceTokenExpires(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		login := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{account: "owner", listErr: &gsa.DeviceRequestError{HTTPStatus: 401}}}
+		if !available {
+			login.quotaErr = &icloud.StorageError{HTTPStatus: 401}
+		}
+		got, devices, err := renewSessionMode(func() (maintainedLogin, error) { return login, nil }, "owner", appleservices.DeviceRegistration{}, false)
+		if available {
+			if !errors.Is(err, errDeviceSessionExpired) || got != login || devices != nil || login.saved != 1 {
+				t.Fatal("live iCloud session was not retained independently of device access")
+			}
+		} else if err != login.quotaErr || got != nil || login.saved != 0 {
+			t.Fatal("rejected iCloud session was adopted")
+		}
 	}
 }

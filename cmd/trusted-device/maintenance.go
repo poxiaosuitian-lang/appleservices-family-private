@@ -16,6 +16,13 @@ import (
 )
 
 var errVerificationRequired = errors.New("account verification is required; complete it in the dashboard")
+var errDeviceSessionExpired = errors.New("device management needs verification; iCloud session remains valid")
+
+func deviceAuthenticationExpired(err error) bool {
+	var request *gsa.DeviceRequestError
+	return errors.Is(err, appleservices.ErrDeviceIdentityRefreshRequired) ||
+		errors.As(err, &request) && request.HTTPStatus == 401
+}
 
 func deviceListFailure(err error) control.Result {
 	var requestErr *gsa.DeviceRequestError
@@ -94,12 +101,31 @@ func renewSessionMode(begin func() (maintainedLogin, error), accountID string, r
 			return nil, nil, err
 		}
 	}
-	devices, err := login.AccountDevices()
-	if err != nil {
-		return nil, nil, err
+	devices, deviceErr := login.AccountDevices()
+	if deviceErr != nil && (register || !deviceAuthenticationExpired(deviceErr)) {
+		return nil, nil, deviceErr
+	}
+	if !register {
+		// A saved iCloud token needs a live service check even when the
+		// independently authorized device-management request succeeds.
+		reader, ok := login.(interface {
+			StorageInfo(context.Context) (*appleservices.StorageInfo, error)
+		})
+		if ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := reader.StorageInfo(ctx); err != nil {
+				return nil, nil, err
+			}
+		} else if deviceErr != nil {
+			return nil, nil, deviceErr
+		}
 	}
 	if err := login.SaveSession(); err != nil {
 		return nil, nil, err
+	}
+	if deviceErr != nil {
+		return login, nil, errDeviceSessionExpired
 	}
 	return login, devices, nil
 }

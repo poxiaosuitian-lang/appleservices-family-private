@@ -305,7 +305,7 @@ func run() (runErr error) {
 			if err == nil {
 				_, err = login.AccountDevices()
 			}
-			if err == nil {
+			if err == nil || deviceAuthenticationExpired(err) {
 				_, err = login.StorageInfo(ctx)
 			}
 		}
@@ -436,10 +436,9 @@ func run() (runErr error) {
 	if ctx.Err() != nil {
 		return nil
 	}
-	// Restored local tokens are not proof of a live login. Require Apple to
-	// accept both device-management and iCloud access before showing online.
+	// Verify iCloud live, independently of the device-management credential.
 	if *resumeSession {
-		if err != nil {
+		if err != nil && !deviceAuthenticationExpired(err) {
 			return errors.New("saved device session was not accepted; reconnect with the current password")
 		}
 		if _, quotaErr := login.StorageInfo(ctx); quotaErr != nil {
@@ -479,7 +478,8 @@ func run() (runErr error) {
 	}
 	status.PasswordRemembered = passwordRemembered
 	reconnect.blocked = false
-	if *resumeSession {
+	deviceManagementExpired := deviceAuthenticationExpired(err)
+	if *resumeSession && !deviceManagementExpired {
 		var storeErr error
 		if passwordRemembered {
 			_, storeErr = login.CheckSkillStoragePurchaseSession(ctx, func() (string, error) {
@@ -497,10 +497,13 @@ func run() (runErr error) {
 	status.Authenticated, status.State = true, "online"
 	if err != nil {
 		status.State = "device_query_failed"
+		if deviceManagementExpired {
+			status.State = "device_identity_refresh_required"
+		}
 	}
 	status.LastRefreshAt = time.Now().UTC()
 	if panel != nil {
-		panel.SetReady(!*listenOnly)
+		panel.SetReady(!*listenOnly && !deviceManagementExpired)
 		panel.SetStoreSessionReady(login.StorePurchaseSessionReady())
 	}
 	if err := status.save(*dir); err != nil {
@@ -590,16 +593,7 @@ func run() (runErr error) {
 			return renewalPending, nil
 		}
 		if *resumeSession || passwordRemembered || reconnect.blocked {
-			saved, err := resumeSavedLogin(appleID, store, options...)
-			if err == nil {
-				// Older checkpoints restore only GSA. Initialize the iCloud
-				// client just as we do on startup before checking quota.
-				_, err = saved.Client()
-			}
-			if err == nil {
-				_, err = saved.StorageInfo(ctx)
-			}
-			return saved, err
+			return resumeSavedLogin(appleID, store, options...)
 		}
 		renewed, err := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
 		if err == nil {
@@ -619,11 +613,12 @@ func run() (runErr error) {
 			}
 			return candidate, loginErr
 		}, accountID, registration, renewalPending != nil || !*resumeSession && !passwordRemembered && !reconnect.blocked, password, &reconnect)
-		if err != nil {
+		deviceExpired := errors.Is(err, errDeviceSessionExpired)
+		if err != nil && !deviceExpired {
 			previousState := status.State
 			status.State = "refresh_failed"
 			renewalRecovery.afterFailure(err, reconnect.retryAt)
-			if errors.Is(err, errVerificationRequired) || reconnect.blocked || reconnect.recovering {
+			if errors.Is(err, errVerificationRequired) || reconnect.blocked || reconnect.recovering || sessionAuthenticationRejected(err) {
 				// A failed password fallback may have no challenge to submit.
 				// Keep checking the saved session on the normal renewal tick.
 				status.State, status.VerificationRequired = "reconnect_required", false
@@ -658,25 +653,34 @@ func run() (runErr error) {
 				renewedLogin.InheritStorePurchaseSession(previousLogin)
 			}
 		}
+		deviceManagementExpired = deviceExpired
 		active = renewed
 		renewalPending = nil
 		status.VerificationRequired = false
 		renewalRecovery.stop()
 		reconnect.blocked = false
 		if panel != nil {
-			panel.SetReady(!*listenOnly)
+			panel.SetReady(!*listenOnly && !deviceExpired)
 			ready, ok := active.(interface{ StorePurchaseSessionReady() bool })
 			panel.SetStoreSessionReady(ok && ready.StorePurchaseSessionReady())
 		}
 		status.State, status.Authenticated = "online", true
 		status.LastRefreshAt = time.Now().UTC()
 		status.RefreshCount++
-		status.setDevices(devices, *name)
+		if deviceExpired {
+			status.State = "device_identity_refresh_required"
+			status.DeviceCount, status.InstallationVisible = 0, false
+		} else {
+			status.setDevices(devices, *name)
+		}
 		if panel != nil {
 			panel.SetDevices(panelDevices(devices, *name))
 		}
 		if err := status.save(*dir); err != nil {
 			return control.Result{Message: "无法保存登录状态"}
+		}
+		if deviceExpired {
+			return control.Result{OK: true, Stage: status.State, Message: "iCloud 登录有效，设备管理需重新验证"}
 		}
 		return control.Result{OK: true, Message: "登录已续期，设备列表已更新"}
 	}
@@ -707,6 +711,12 @@ func run() (runErr error) {
 	autoHMEForward := make(chan struct{}, 1)
 	autoAppPassword := make(chan struct{}, 1)
 	performAction := func(actionCtx context.Context, action, visibleRequestID, commandCode, commandLabel, commandNote string, answers []icloud.SecurityQuestionAnswer, birthday string) control.Result {
+		if deviceManagementExpired {
+			switch action {
+			case "code", "allow", "deny", "submit-pairing":
+				return control.Result{Stage: status.State, Message: "请重新登录以验证设备管理"}
+			}
+		}
 		if action == "hme-server-web-recover" {
 			var payload hmesync.WebRecoveryPayload
 			if json.Unmarshal([]byte(commandLabel), &payload) != nil || payload.SourceID != hmesync.SourceID(appleID) {
@@ -1449,7 +1459,7 @@ func run() (runErr error) {
 				// Validate the restored session with Apple instead of starting
 				// a password challenge that this worker cannot complete.
 				result := renew()
-				if result.OK {
+				if result.OK && result.Stage == "" {
 					result.Message = "Apple 已核验保存的登录会话，无需重新输入密码"
 				}
 				return result
@@ -1710,7 +1720,9 @@ func run() (runErr error) {
 			}
 		case <-refresh.C:
 			result := renew()
-			if result.OK {
+			if result.Stage == "device_identity_refresh_required" {
+				fmt.Println("iCloud session verified. Device management requires verification.")
+			} else if result.OK {
 				fmt.Printf("Session renewed. Device query succeeded: count=%d, installation_visible=%t.\n", status.DeviceCount, status.InstallationVisible)
 			} else {
 				fmt.Fprintf(os.Stderr, "Session renewal incomplete (state=%s).\n", status.State)
