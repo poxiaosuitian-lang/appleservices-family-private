@@ -1050,7 +1050,7 @@ func (s *Server) setMessage(account *Account, message string) {
 	account.mu.Unlock()
 }
 
-func (s *Server) Bootstrap(ctx context.Context, appleID, password string) {
+func (s *Server) Bootstrap(ctx context.Context, appleID, password string, resumeAccounts bool) {
 	go s.runRecoveryListeners(ctx)
 	if appleID != "" && password != "" {
 		go func() {
@@ -1061,6 +1061,9 @@ func (s *Server) Bootstrap(ctx context.Context, appleID, password string) {
 				s.mu.Unlock()
 			}
 		}()
+	}
+	if !resumeAccounts {
+		return
 	}
 	go func() {
 		s.accountsMu.Lock()

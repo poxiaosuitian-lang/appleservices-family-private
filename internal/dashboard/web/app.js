@@ -136,7 +136,11 @@ function clearCode() {
   $('codeDetail').textContent = codeIdleMessage(current);
   $('copyButton').disabled = true;
 }
+function deviceVerificationNeeded(status) {
+  return !!status?.running && !!status.authenticated && status.state === 'device_identity_refresh_required';
+}
 function codeIdleMessage(view) {
+  if (deviceVerificationNeeded(view?.status)) return '设备验证已失效，重新登录后可查看验证码。';
   const status = view?.status || {};
   if (status.state === 'awaiting_device_code' && status.local_verification === 'request_failed') return '验证码发送请求未完成，请改用其他验证方式';
   if (status.state === 'awaiting_device_code' && status.local_verification === 'failed') return '本机验证未完成，请使用受信任设备或短信验证码';
@@ -614,11 +618,12 @@ function renderAccounts(view) {
       strong.append(role);
     }
     const small = document.createElement('small');
-    const state = account.running ? (account.authenticated ? '在线' : needsReconnect(account.state) ? '需重连' : codeEntryStates.has(account.state) ? '待验证' : '连接中') : account.icloud_activated ? 'iCloud 已激活' : '已停止';
-    small.textContent = account.family_organizer ? '家庭组织者 · ' + state : child ? '家庭成员 · ' + state : organizer ? 'iCloud+ · ' + state : account.running && account.authenticated ? '在线工作区' : state;
+    const partial = deviceVerificationNeeded(account);
+    const state = partial ? '设备需验证' : account.running ? (account.authenticated ? '在线' : needsReconnect(account.state) ? '需重连' : codeEntryStates.has(account.state) ? '待验证' : '连接中') : account.icloud_activated ? 'iCloud 已激活' : '已停止';
+    small.textContent = account.family_organizer ? '家庭组织者 · ' + state : child ? '家庭成员 · ' + state : organizer ? 'iCloud+ · ' + state : account.running && account.authenticated && !partial ? '在线工作区' : state;
     copy.append(strong, small);
     const dot = document.createElement('i');
-    dot.className = account.running && account.authenticated ? 'on' : account.running ? 'waiting' : account.icloud_activated ? 'activated' : '';
+    dot.className = account.running && account.authenticated && !partial ? 'on' : account.running ? 'waiting' : account.icloud_activated ? 'activated' : '';
     item.append(avatar, copy, dot);
     item.addEventListener('click', () => {
       selectedAccount = account.id;
@@ -762,6 +767,7 @@ function render(view) {
   renderActivation(view);
 
   const status = view.status || {}, online = status.running && status.authenticated, activated = !!view.icloud_activated, reconnectRequired = !online && needsReconnect(status.state), waiting = status.verification_required && !reconnectRequired, running = status.running || view.launching, starting = running && !online && !waiting && !reconnectRequired;
+  const partial = deviceVerificationNeeded(status);
   renderAppPassword(view, online);
   $('serverSyncButton').disabled = !online || !view.control_ready;
   $('serverSyncResult').hidden = !$('serverSyncResult').textContent || $('serverSyncResult').dataset.account !== selectedAccount;
@@ -786,8 +792,8 @@ function render(view) {
   renderSecurityQuestions(view, online && view.control_ready && !mailWorking);
   const sessionCard = $('sessionCard');
   if (sessionCard) {
-    sessionCard.classList.toggle('is-online', !!online);
-    sessionCard.classList.toggle('is-waiting', !!(waiting || starting));
+    sessionCard.classList.toggle('is-online', !!online && !partial);
+    sessionCard.classList.toggle('is-waiting', !!(waiting || starting || partial));
   }
 
   if (storeAuthAccount !== selectedAccount || storeAuthPID !== (status.pid || 0) || !online) {
@@ -840,7 +846,7 @@ function render(view) {
   $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户'));
   $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : reconnectRequired ? '自动续期未完成，可点击“重新连接”恢复登录。' : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
 
-  if (online && status.state === 'device_identity_refresh_required') {
+  if (partial) {
     $('sessionTitle').textContent = 'iCloud 在线 · 设备管理需验证';
     $('sessionDescription').textContent = '点击“重新登录”恢复设备管理。';
   }
@@ -870,15 +876,15 @@ function render(view) {
   $('capabilityNotice').hidden = !capabilities.length;
   $('capabilityNotice').textContent = capabilities.join(' ');
 
-  $('statusBadge').className = 'status-badge' + (online ? ' online' : waiting || starting ? ' waiting' : '');
+  $('statusBadge').className = 'status-badge' + (partial ? ' waiting' : online ? ' online' : waiting || starting ? ' waiting' : '');
   $('statusBadge').replaceChildren();
   const dot = document.createElement('i');
-  $('statusBadge').append(dot, document.createTextNode(online ? '在线' : reconnectRequired ? '需重连' : waiting ? '待验证' : starting ? '连接中' : '未连接'));
+  $('statusBadge').append(dot, document.createTextNode(partial ? '设备需验证' : online ? '在线' : reconnectRequired ? '需重连' : waiting ? '待验证' : starting ? '连接中' : '未连接'));
 
-  $('authState').textContent = online ? '已认证' : reconnectRequired ? '需重连' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
+  $('authState').textContent = partial ? '仅 iCloud 已认证' : online ? '已认证' : reconnectRequired ? '需重连' : waiting ? '等待验证' : starting ? '认证中' : '未登录';
   $('pushState').textContent = status.push_connected ? '已连接' : status.push_issue === 'reconnecting' ? '重连中' : '未连接';
   $('renewState').textContent = online ? '每 10 分钟' : activated ? '按需验证' : '等待登录';
-  for (const [id, active] of [['authDot', online], ['pushDot', status.push_connected], ['renewDot', online]]) $(id).classList.toggle('active', !!active);
+  for (const [id, active] of [['authDot', online && !partial], ['pushDot', status.push_connected], ['renewDot', online]]) $(id).classList.toggle('active', !!active);
 
   $('accountTag').hidden = !view.account;
   $('accountTag').textContent = view.account;
@@ -902,7 +908,7 @@ function render(view) {
   $('navCount').textContent = status.device_count || '—';
 
   const storageRefreshing = autoRefreshAttemptStatus(autoRefreshKey('storage', view.storage_checked_at)) === 'refreshing';
-  $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online;
+  $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online || partial;
   $('devicesButton').disabled = busy || !online || !view.control_ready;
   $('storageButton').disabled = busy || storageRefreshing || (!activated && (!online || !view.control_ready));
   $('subscriptionStatusButton').disabled = $('storageButton').disabled;
@@ -980,7 +986,7 @@ function render(view) {
 
   $('lastUpdated').textContent = running ? '后台运行中 · ' + time(status.updated_at) : '后台未运行';
   if (!privateCode) $('codeDetail').textContent = codeIdleMessage(view);
-  if (online && lastState !== status.state) activity('后台登录已连接');
+  if (online && lastState !== status.state) activity(partial ? '设备管理需要重新验证' : '后台登录已连接');
   if (!online && lastState === 'online') { activity('后台登录状态已变化'); clearCode(); }
   lastState = status.state;
   if (status.last_device_query_at && !status.last_device_query_at.startsWith('0001') && lastQuery !== status.last_device_query_at) {
@@ -1188,7 +1194,8 @@ async function action(name, extra = {}, options = {}) {
     }
     if (options.autoKey) autoRefreshState.delete(options.autoKey);
     if (result.code && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionVerificationContext === verificationContext) showCode(result);
-    else if (!options.silent) notice(result.message || '操作已完成');
+    else if (!options.silent && result.stage === 'device_identity_refresh_required') notice(result.message || '设备管理需要重新验证', true);
+    else if (!options.silent && result.message) notice(result.message);
     await poll();
     return result;
   } catch (error) {

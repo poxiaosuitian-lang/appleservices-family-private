@@ -17,6 +17,7 @@ func main() {
 	python := flag.String("python", "python", "64-bit Python executable")
 	macPushSetup := flag.String("mac-push-setup", "./tools/mac-push-check.py", "account-isolated Mac APS bootstrap")
 	port := flag.Int("port", 18741, "loopback dashboard port")
+	resumeAccounts := flag.Bool("resume-accounts", true, "start saved accounts that have no running worker on dashboard startup")
 	flag.Parse()
 	absDir, _ := filepath.Abs(*dir)
 	absWorker, _ := filepath.Abs(*worker)
@@ -32,7 +33,7 @@ func main() {
 	appleID, password := os.Getenv("APPLESERVICES_APPLEID"), os.Getenv("APPLESERVICES_PASSWORD")
 	os.Unsetenv("APPLESERVICES_APPLEID")
 	os.Unsetenv("APPLESERVICES_PASSWORD")
-	server.Bootstrap(ctx, appleID, password)
+	server.Bootstrap(ctx, appleID, password, *resumeAccounts)
 	fmt.Println("Local dashboard:", server.URL())
 	if err := server.Serve(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "Dashboard stopped")

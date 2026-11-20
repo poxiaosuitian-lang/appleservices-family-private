@@ -167,6 +167,11 @@ func (c *Client) doRequest(request map[string]any) (map[string]any, error) {
 		if !errors.As(err, &dropped) || attempt == gsaRequestAttempts {
 			return nil, err
 		}
+		// Leave a rate limit or unavailable service for a later login. Sending
+		// the same request every 400 ms prolongs the wait in the panel.
+		if dropped.status == 429 || dropped.status == 503 {
+			return nil, err
+		}
 		lastErr = err
 		time.Sleep(gsaRetryDelay)
 	}

@@ -108,8 +108,7 @@ func TestGrandSlamStopsOnUnknownProtocol(t *testing.T) {
 }
 
 func TestGrandSlamErrorsIdentifyStage(t *testing.T) {
-	// 429 and 5xx are dropped requests, not answers: they are resent, and only
-	// a permanent status is reported as an HTTP rejection.
+	// A rate limit or unavailable service must not spin in the login dialog.
 	for _, status := range []int{429, 503} {
 		if !retryableGSAStatus(status) {
 			t.Fatalf("status %d is not treated as a dropped request", status)
@@ -123,8 +122,8 @@ func TestGrandSlamErrorsIdentifyStage(t *testing.T) {
 		if _, err := c.doRequest(map[string]any{"o": "init"}); err == nil {
 			t.Fatal("exhausted retries were reported as success")
 		}
-		if requests != gsaRequestAttempts {
-			t.Fatalf("made %d attempts, want %d", requests, gsaRequestAttempts)
+		if requests != 1 {
+			t.Fatalf("status %d triggered %d attempts", status, requests)
 		}
 	}
 	for _, status := range []int{400, 401, 405} {
