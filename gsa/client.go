@@ -141,6 +141,15 @@ func (c *Client) doRequest(request map[string]any) (map[string]any, error) {
 		"Accept":       "*/*",
 		"User-Agent":   "akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0",
 	}
+	// AuthKit includes the machine headers in both the HTTP envelope and cpd.
+	// Keep both copies on the same cached anisette snapshot for this request.
+	for _, key := range []string{"X-Apple-I-MD", "X-Apple-I-MD-M", "X-Apple-I-MD-RINFO",
+		"X-Apple-I-MD-LU", "X-Mme-Device-Id", "X-Apple-I-SRL-NO",
+		"X-Apple-Locale", "X-Apple-I-Client-Time", "X-Apple-I-TimeZone"} {
+		if value := caseInsensitiveLookup(anisetteHeaders, key); value != "" {
+			headers[key] = value
+		}
+	}
 	if ua := caseInsensitiveLookup(anisetteHeaders, "User-Agent"); ua != "" {
 		headers["User-Agent"] = ua
 	}

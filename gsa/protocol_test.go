@@ -40,7 +40,9 @@ func plistResponse(t *testing.T, v map[string]any) *http.Response {
 func TestGrandSlamNormalizesWireHeaderAndCPD(t *testing.T) {
 	oldInfo := "<MacBookPro13,2> <macOS;13.1;22C65> <com.apple.AuthKit/1 (com.apple.dt.Xcode/3594.4.19)>"
 	expected := "<MacBookPro13,2> <macOS;13.1;22C65> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
-	p := headerProvider{"x-mme-client-info": oldInfo, "User-Agent": "test-akd", "X-Apple-I-MD": "test-md"}
+	p := headerProvider{"x-mme-client-info": oldInfo, "User-Agent": "test-akd", "X-Apple-I-MD": "test-md",
+		"X-Apple-I-MD-M": "test-machine", "X-Mme-Device-Id": "test-device",
+		"X-Apple-I-MD-LU": "test-lookup", "X-Apple-I-MD-RINFO": "test-routing"}
 	c := NewClient(p)
 	c.transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("X-Mme-Client-Info") != expected || r.Header.Get("User-Agent") != "test-akd" {
@@ -56,6 +58,12 @@ func TestGrandSlamNormalizesWireHeaderAndCPD(t *testing.T) {
 		}
 		request := envelope["Request"].(map[string]any)
 		cpd := request["cpd"].(map[string]any)
+		for _, key := range []string{"X-Apple-I-MD", "X-Apple-I-MD-M", "X-Mme-Device-Id",
+			"X-Apple-I-MD-LU", "X-Apple-I-MD-RINFO"} {
+			if r.Header.Get(key) != p[key] || cpd[key] != p[key] {
+				t.Errorf("HTTP and cpd machine identity differ for %s", key)
+			}
+		}
 		if cpd["X-Mme-Client-Info"] != expected || cpd["X-Apple-I-MD"] != "test-md" || cpd["User-Agent"] != nil {
 			t.Error("GSA CPD differs from compatible identity or contains HTTP-only User-Agent")
 		}
