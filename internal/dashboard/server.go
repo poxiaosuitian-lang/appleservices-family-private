@@ -1002,6 +1002,8 @@ func lastProcessError(path string) string {
 			return "所选目录缺少有效设备身份，请选择已有账号，或通过添加账号建立身份"
 		case strings.Contains(line, "APPLESERVICES_APPLEID and APPLESERVICES_PASSWORD are required"):
 			return "请重新输入当前账号密码"
+		case strings.Contains(line, "gsa: request did not reach the application (HTTP 503)"):
+			return "Apple 登录服务暂时不可用（HTTP 503），请稍后重新连接"
 		case strings.Contains(line, "saved login session cannot be restored"), strings.Contains(line, "saved device session was not accepted"), strings.Contains(line, "saved iCloud session was not accepted"), strings.Contains(line, "saved login session is incomplete"):
 			return "Apple 已保存会话失效，请输入当前账号密码重新连接"
 		case strings.Contains(line, "ec=-22406") && strings.Contains(line, "correct password"):

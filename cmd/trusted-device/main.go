@@ -66,6 +66,7 @@ func run() (runErr error) {
 	controlAPI := flag.Bool("control-api", false, "enable authenticated local dashboard control")
 	guiAuth := flag.Bool("gui-auth", false, "complete initial SMS verification through the dashboard")
 	resumeSession := flag.Bool("resume-session", false, "restore the account-bound GSA and accepted iCloud sessions without a password")
+	useSavedPassword := flag.Bool("use-saved-password", false, "start a new login using the password saved for this account")
 	rememberPassword := flag.Bool("remember-password", false, "save a verified password with Windows user encryption for automatic reconnect")
 	forgetPassword := flag.Bool("forget-password", false, "remove the saved password after this successful login")
 	flag.Parse()
@@ -165,12 +166,21 @@ func run() (runErr error) {
 		return nil
 	}
 	appleID, password := os.Getenv("APPLESERVICES_APPLEID"), os.Getenv("APPLESERVICES_PASSWORD")
-	if appleID == "" || (!*resumeSession && password == "") {
+	if appleID == "" || (!*resumeSession && !*useSavedPassword && password == "") {
 		return errors.New("APPLESERVICES_APPLEID and APPLESERVICES_PASSWORD are required")
 	}
 	os.Unsetenv("APPLESERVICES_APPLEID")
 	os.Unsetenv("APPLESERVICES_PASSWORD")
 	storedPassword := savedLoginPassword(store, appleID)
+	if *useSavedPassword {
+		if *resumeSession || password != "" {
+			return errors.New("saved-password login cannot be combined with session restore or a supplied password")
+		}
+		if storedPassword == "" {
+			return errors.New("no saved password is available for this account")
+		}
+		password = storedPassword
+	}
 	if *resumeSession && password == "" {
 		password = storedPassword
 	}
