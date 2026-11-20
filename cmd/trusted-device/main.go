@@ -334,8 +334,8 @@ func run() (runErr error) {
 	}
 	input := bufio.NewReader(os.Stdin)
 	localVerificationTried := false
-	verifyLocal := func(candidate *appleservices.Login) {
-		attempted, state, verificationErr := completeLocalVerification(*method, localADI != nil && !*listenOnly, candidate, func() (string, error) {
+	verifyLocal := func(candidate *appleservices.Login, method string) {
+		attempted, state, verificationErr := completeLocalVerification(method, localADI != nil && !*listenOnly, candidate, func() (string, error) {
 			codeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			return generateCode(codeCtx)
@@ -346,7 +346,7 @@ func run() (runErr error) {
 			fmt.Fprintln(os.Stderr, "Local device verification requires manual completion; no automatic retry.")
 		}
 	}
-	verifyLocal(login)
+	verifyLocal(login, *method)
 	if login.NeedsTwoFactor() && *method == "circle" {
 		if panel == nil || !*guiAuth {
 			return errors.New("Circle login requires the dashboard control API")
@@ -583,16 +583,17 @@ func run() (runErr error) {
 	var renewalRecovery renewalRetry
 	defer renewalRecovery.stop()
 	var renewalPending *appleservices.Login
-	renewalFactor := initialVerificationFactor(*method)
+	renewalMethod := renewalVerificationMethod(*method, localADI != nil && !*listenOnly)
+	renewalFactor := initialVerificationFactor(renewalMethod)
 	var renewalLastSent time.Time
 	prepareRenewal := func(candidate *appleservices.Login) {
-		verifyLocal(candidate)
+		verifyLocal(candidate, renewalMethod)
 		if !candidate.NeedsTwoFactor() {
 			return
 		}
 		renewalPending = candidate
 		renewalLastSent = time.Now()
-		if !localVerificationTried && *method != "sms-existing" {
+		if !localVerificationTried && renewalMethod != "sms-existing" {
 			if candidate.RequestCode(renewalFactor) != nil {
 				status.LocalVerification = localVerificationRequestFailed
 			}

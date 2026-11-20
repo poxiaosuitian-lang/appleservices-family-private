@@ -23,6 +23,7 @@ func TestReconnectOnlyAfterExplicitAppleAuthenticationRejection(t *testing.T) {
 		{&gsa.DeviceRequestError{HTTPStatus: 401}, true},
 		{fmt.Errorf("wrapped: %w", &icloud.StorageError{HTTPStatus: 403}), true},
 		{&icloud.DelegateError{HTTPStatus: 401}, true},
+		{errDeviceSessionExpired, true},
 		{&icloud.StorageError{HTTPStatus: 429}, false}, {&gsa.DeviceRequestError{HTTPStatus: 503}, false},
 		{errVerificationRequired, false},
 	} {
@@ -205,6 +206,63 @@ func TestExpiredSessionReconnectsOnceAndAdoptsOnlyVerifiedAccount(t *testing.T) 
 				if calls != 1 {
 					t.Fatal("rejected credentials or 2FA were retried automatically")
 				}
+			}
+		})
+	}
+}
+
+type automaticRenewalLogin struct {
+	fakeMaintainedLogin
+	verificationErr error
+}
+
+func (l *automaticRenewalLogin) CompleteLocalTwoFactor(code func() (string, error)) (bool, error) {
+	if _, err := code(); err != nil {
+		return true, err
+	}
+	if l.verificationErr != nil {
+		return true, l.verificationErr
+	}
+	l.challenge = false
+	return true, nil
+}
+
+func TestDeviceExpirationAutomaticallyVerifiesBeforeAdoptingRenewal(t *testing.T) {
+	for _, rejected := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rejected=%t", rejected), func(t *testing.T) {
+			old := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+				account: "owner", listErr: &gsa.DeviceRequestError{HTTPStatus: 401},
+			}}
+			candidate := &automaticRenewalLogin{fakeMaintainedLogin: fakeMaintainedLogin{account: "owner", challenge: true}}
+			if rejected {
+				candidate.verificationErr = errors.New("local verification rejected")
+			}
+			passwordLogins, generated := 0, 0
+			begin := func() (maintainedLogin, error) { return old, nil }
+			fresh := func() (maintainedLogin, error) {
+				passwordLogins++
+				method := renewalVerificationMethod("sms", true)
+				completeLocalVerification(method, true, candidate, func() (string, error) {
+					generated++
+					return "123456", nil
+				})
+				return candidate, nil
+			}
+			gate := reconnectGate{}
+			got, devices, err := renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+			if passwordLogins != 1 || generated != 1 {
+				t.Fatal("expired device identity did not trigger automatic verification")
+			}
+			if rejected {
+				if !errors.Is(err, errVerificationRequired) || got != nil || candidate.saved != 0 {
+					t.Fatal("rejected verification was adopted")
+				}
+				renewWithReconnect(begin, fresh, "owner", appleservices.DeviceRegistration{}, false, "fixture", &gate)
+				if passwordLogins != 1 || generated != 1 {
+					t.Fatal("rejected verification was automatically replayed")
+				}
+			} else if err != nil || got != candidate || len(devices) == 0 || candidate.saved != 1 || candidate.registered != 1 {
+				t.Fatal("automatically verified renewal did not complete registration and checkpoint")
 			}
 		})
 	}

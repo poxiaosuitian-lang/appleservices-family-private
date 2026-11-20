@@ -162,7 +162,7 @@ func (g *reconnectGate) deferHandshakeRetry(err error, now time.Time) {
 }
 
 func (g *reconnectGate) allow(err error, password string) bool {
-	if password == "" || !sessionAuthenticationRejected(err) {
+	if password == "" || (!sessionAuthenticationRejected(err) && !errors.Is(err, errDeviceSessionExpired)) {
 		return false
 	}
 	if g.blocked && (g.retryAt.IsZero() || time.Now().Before(g.retryAt)) {

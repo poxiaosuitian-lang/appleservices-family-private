@@ -50,6 +50,15 @@ func initialVerificationFactor(method string) appleservices.TwoFactorMethod {
 	return appleservices.SMS
 }
 
+// Background recovery can verify the same native device even when the initial
+// interactive login used SMS. Login checks the saved account binding itself.
+func renewalVerificationMethod(initial string, localAvailable bool) string {
+	if localAvailable {
+		return "trusted-device"
+	}
+	return initial
+}
+
 type pendingVerificationLogin interface {
 	RequestCode(appleservices.TwoFactorMethod) error
 	SubmitCode(appleservices.TwoFactorMethod, string) error
