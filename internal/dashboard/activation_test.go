@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	appleservices "github.com/Laky-64/appleservices"
@@ -40,5 +41,23 @@ func TestVerifiedGSACheckpointRequiresAccountBoundPET(t *testing.T) {
 	}
 	if verifiedGSACheckpointReady(dir, session.AppleID) {
 		t.Fatal("checkpoint without PET was accepted")
+	}
+}
+
+func TestFilteredActivationEnvSetsRunAsInvokerAndStripsSecrets(t *testing.T) {
+	t.Setenv("APPLESERVICES_PASSWORD", "secret")
+	t.Setenv("HTTP_PROXY", "http://proxy.invalid")
+	t.Setenv("__COMPAT_LAYER", "RequireAdministrator")
+	env := filteredActivationEnv("owner@example.test")
+	if !slices.Contains(env, "__COMPAT_LAYER=RunAsInvoker") {
+		t.Fatal("activation env did not set __COMPAT_LAYER=RunAsInvoker")
+	}
+	if !slices.Contains(env, "APPLESERVICES_APPLEID=owner@example.test") || !slices.Contains(env, "APPLESERVICES_DELEGATE_PATH=v2") || !slices.Contains(env, "NO_PROXY=*") {
+		t.Fatal("activation env missing required settings")
+	}
+	for _, entry := range env {
+		if entry == "APPLESERVICES_PASSWORD=secret" || entry == "HTTP_PROXY=http://proxy.invalid" || entry == "__COMPAT_LAYER=RequireAdministrator" {
+			t.Fatalf("unexpected inherited env entry: %s", entry)
+		}
 	}
 }
