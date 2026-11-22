@@ -3079,7 +3079,8 @@ dialog::backdrop {
   cursor: pointer;
 }
 
-#rememberPassword {
+#rememberPassword,
+.dialog-form label.remember-login input[type="checkbox"] {
   width: 16px;
   height: 16px;
   padding: 0;
@@ -3087,6 +3088,10 @@ dialog::backdrop {
   flex: 0 0 16px;
   accent-color: var(--blue);
   cursor: pointer;
+}
+
+.dialog-option-box .cache-note:empty {
+  display: none;
 }
 
 .dialog-option-box .cache-note {

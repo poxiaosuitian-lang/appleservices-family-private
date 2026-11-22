@@ -228,8 +228,41 @@ func TestRecoveryStatusDoesNotLeakAcrossDisabledAccounts(t *testing.T) {
 		if json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Profiles) != 1 {
 			t.Fatal("invalid profile response")
 		}
-		if (out.Profiles[0].RecoveryStatus != nil) != (id == "enabled") {
+	if (out.Profiles[0].RecoveryStatus != nil) != (id == "enabled") {
 			t.Fatal("another account's listener was shown for disabled account")
 		}
+		if id == "enabled" && (out.Profiles[0].RecoveryEnabled == nil || !*out.Profiles[0].RecoveryEnabled) {
+			t.Fatal("enabled account missing recovery_enabled=true")
+		}
+		if id == "disabled" && out.Profiles[0].RecoveryEnabled != nil {
+			t.Fatal("unconfigured account should omit recovery_enabled so UI defaults to opt-in")
+		}
+	}
+	// Explicit opt-out persists recovery_enabled=false while unconfigured accounts remain omitted.
+	body, _ := json.Marshal(map[string]any{"profile_id": cfg.Profiles[0].ID, "url": cfg.Profiles[0].URL, "enabled": false})
+	req := httptest.NewRequest("POST", s.URL()+"/api/sync-recovery?account=disabled", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-App-Token", s.token)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatal("explicit disable failed")
+	}
+	req = httptest.NewRequest("GET", s.URL()+"/api/sync-profiles?account=disabled", nil)
+	req.Header.Set("X-App-Token", s.token)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var out struct {
+		Profiles []syncProfilePublic `json:"profiles"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Profiles) != 1 || out.Profiles[0].RecoveryEnabled == nil || *out.Profiles[0].RecoveryEnabled {
+		t.Fatal("explicit opt-out did not return recovery_enabled=false")
+	}
+	if _, err := s.changeSyncProfiles(syncProfileInput{Operation: "save", ID: cfg.Profiles[0].ID, URL: "https://changed.example.test", Token: strings.Repeat("x", 32)}); err != nil {
+		t.Fatal(err)
+	}
+	changed, _ := s.readSyncProfiles()
+	if len(changed.Profiles[0].RecoveryDisabled) != 0 {
+		t.Fatal("explicit opt-out leaked across changed destination URL")
 	}
 }

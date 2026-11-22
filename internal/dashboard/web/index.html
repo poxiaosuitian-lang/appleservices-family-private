@@ -727,8 +727,10 @@
     <label for="serverSyncToken">专用同步密钥</label>
     <input id="serverSyncToken" type="password" autocomplete="new-password" minlength="6" maxlength="512" required>
     <p class="cache-note">同步账号并登录 Apple 新通道；需要时将使用本机密码和验证码完成服务器认证。</p>
-    <label class="remember-login"><input id="serverRecoveryEnabled" type="checkbox">允许服务器按需恢复登录</label>
-    <p class="cache-note" id="serverRecoveryStatus" role="status"></p>
+    <div class="dialog-option-box">
+      <label class="remember-login"><input id="serverRecoveryEnabled" type="checkbox"> <span>允许服务器按需恢复登录</span></label>
+      <p class="cache-note" id="serverRecoveryStatus" role="status"></p>
+    </div>
     <div id="serverSyncOTPRow" hidden>
       <label for="serverSyncOTPSource">验证码来源</label>
       <select id="serverSyncOTPSource">

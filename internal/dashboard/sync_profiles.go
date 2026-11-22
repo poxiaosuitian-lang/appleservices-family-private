@@ -16,6 +16,7 @@ import (
 type syncProfile struct {
 	RecoveryRevision uint64                     `json:"recovery_revision,omitempty"`
 	RecoverySources  map[string]string          `json:"recovery_sources,omitempty"`
+	RecoveryDisabled map[string]string          `json:"recovery_disabled,omitempty"`
 	RecoveryHandled  map[string]recoveryAttempt `json:"recovery_handled,omitempty"`
 	ID               string                     `json:"id"`
 	URL              string                     `json:"url"`
@@ -34,7 +35,7 @@ type syncProfileInput struct {
 	Token     string `json:"token"`
 }
 type syncProfilePublic struct {
-	RecoveryEnabled bool            `json:"recovery_enabled"`
+	RecoveryEnabled *bool           `json:"recovery_enabled,omitempty"`
 	RecoveryStatus  *recoveryStatus `json:"recovery_status,omitempty"`
 	ID              string          `json:"id"`
 	URL             string          `json:"url"`
@@ -148,6 +149,7 @@ func (s *Server) changeSyncProfiles(input syncProfileInput) (syncProfiles, error
 		}
 		if value.Profiles[index].URL != address {
 			value.Profiles[index].RecoverySources = nil
+			value.Profiles[index].RecoveryDisabled = nil
 			value.Profiles[index].RecoveryHandled = nil
 		}
 		value.Profiles[index].URL = address
@@ -195,20 +197,30 @@ func (s *Server) serveSyncProfiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	public := make([]syncProfilePublic, 0, len(value.Profiles))
+	account := s.lookup(r.URL.Query().Get("account"))
 	for _, p := range value.Profiles {
 		item := syncProfilePublic{ID: p.ID, URL: p.URL, KeySaved: p.Token != ""}
-		if a := s.lookup(r.URL.Query().Get("account")); a != nil {
-			item.RecoveryEnabled = p.RecoverySources[a.ID] == hmesync.SourceID(a.AppleID)
+		recoveryEnabled := false
+		if account != nil {
+			sourceID := hmesync.SourceID(account.AppleID)
+			if p.RecoverySources[account.ID] == sourceID {
+				enabled := true
+				item.RecoveryEnabled = &enabled
+				recoveryEnabled = true
+			} else if p.RecoveryDisabled[account.ID] == sourceID {
+				disabled := false
+				item.RecoveryEnabled = &disabled
+			}
 		}
-		if status, ok := s.recoveryStatus.Load(p.ID); ok && item.RecoveryEnabled {
+		if status, ok := s.recoveryStatus.Load(p.ID); ok && recoveryEnabled {
 			value := status.(recoveryStatus)
 			item.RecoveryStatus = &value
 		}
-		if a := s.lookup(r.URL.Query().Get("account")); a != nil && item.RecoveryEnabled {
-			if attempt := p.RecoveryHandled[hmesync.SourceID(a.AppleID)]; attempt.Outcome == "verification_required" {
+		if account != nil && recoveryEnabled {
+			if attempt := p.RecoveryHandled[hmesync.SourceID(account.AppleID)]; attempt.Outcome == "verification_required" {
 				item.RecoveryStatus = &recoveryStatus{State: "verification_required", Message: "Apple 要求人工验证，请在此窗口完成验证"}
 			}
-			if attempt := p.RecoveryHandled[hmesync.SourceID(a.AppleID)+":web"]; attempt.Outcome == "verification_required" {
+			if attempt := p.RecoveryHandled[hmesync.SourceID(account.AppleID)+":web"]; attempt.Outcome == "verification_required" {
 				item.RecoveryStatus = &recoveryStatus{State: "verification_required", Message: "Web 会话需要验证，请先在本机读取隐藏邮箱，再重新开启按需恢复"}
 			}
 		}

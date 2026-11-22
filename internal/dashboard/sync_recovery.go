@@ -56,12 +56,18 @@ func (s *Server) serveSyncRecovery(w http.ResponseWriter, r *http.Request) {
 		if p.RecoverySources == nil {
 			p.RecoverySources = map[string]string{}
 		}
+		sourceID := hmesync.SourceID(account.AppleID)
 		if input.Enabled {
-			p.RecoverySources[account.ID] = hmesync.SourceID(account.AppleID)
-			delete(p.RecoveryHandled, hmesync.SourceID(account.AppleID))
-			delete(p.RecoveryHandled, hmesync.SourceID(account.AppleID)+":web")
+			p.RecoverySources[account.ID] = sourceID
+			delete(p.RecoveryDisabled, account.ID)
+			delete(p.RecoveryHandled, sourceID)
+			delete(p.RecoveryHandled, sourceID+":web")
 		} else {
 			delete(p.RecoverySources, account.ID)
+			if p.RecoveryDisabled == nil {
+				p.RecoveryDisabled = map[string]string{}
+			}
+			p.RecoveryDisabled[account.ID] = sourceID
 		}
 		p.RecoveryRevision++
 		if s.writeSyncProfiles(value) != nil {

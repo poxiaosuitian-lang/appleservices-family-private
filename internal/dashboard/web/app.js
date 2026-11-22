@@ -1589,7 +1589,11 @@ function selectSyncProfile(id) {
   $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '';
   $('serverSyncDelete').disabled = !profile;
   $('serverRecoveryEnabled').checked = profile?.recovery_enabled ?? true;
-  $('serverRecoveryStatus').textContent = profile?.recovery_enabled ? (profile.recovery_status?.message || '已启用，等待服务器请求') : '';
+  $('serverRecoveryStatus').textContent = profile?.recovery_enabled === true
+    ? (profile.recovery_status?.message || '已启用，等待服务器请求')
+    : profile && profile.recovery_enabled === undefined
+      ? '同步完成后启用'
+      : '';
   syncFeedback('');
 }
 function renderSyncProfiles(data) {
