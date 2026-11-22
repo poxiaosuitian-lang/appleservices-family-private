@@ -844,8 +844,8 @@ function render(view) {
     awaiting_pairing_code: '输入设备配对码',
     verifying_pairing: '正在验证设备配对'
   };
-  $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户'));
-  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : reconnectRequired ? '自动续期未完成，可点击“重新连接”恢复登录。' : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
+  $('sessionTitle').textContent = online ? (status.push_issue === 'reconnecting' ? '登录正常 · 推送重连中' : status.state === 'refresh_failed' ? '已登录 · 续期暂未完成' : '登录持续在线') : (view.launching && !status.running ? '正在连接 Apple' : (titles[status.state] || (status.state === 'failed' && !activated ? '后台异常停止' : starting ? '正在连接 Apple' : waiting ? '需要短信验证' : activated ? 'iCloud 已激活' : '连接你的 Apple 账户')));
+  $('sessionDescription').textContent = online ? (status.push_issue === 'reconnecting' ? '正在恢复推送连接…' : '') : view.launching && !status.running ? (view.message || '') : reconnectRequired ? '自动续期未完成，可点击“重新连接”恢复登录。' : waiting ? (localVerificationRequestFailed ? '验证码发送请求未完成；请在受信任设备上获取验证码，或改用短信验证。' : localVerificationFailed ? '本机验证未完成，请使用受信任设备或短信验证码。' : deviceCode ? '请使用已登录该账号的受信任 Apple 设备上的验证码完成验证。' : status.state === 'awaiting_existing_sms' ? '请填写此前已经收到的短信验证码；本次不会再次发送。' : '请使用绑定手机号收到的验证码完成登录。') : status.state === 'failed' ? '本次登录未完成，请重新连接。' : '';
 
   if (partial) {
     $('sessionTitle').textContent = 'iCloud 在线 · 设备管理需验证';

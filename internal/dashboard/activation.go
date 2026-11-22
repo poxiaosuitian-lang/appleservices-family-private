@@ -167,7 +167,52 @@ func installAcceptedCheckpoint(source, destination string) error {
 	return errors.Join(writeErr, closeErr)
 }
 
+func shouldAutoActivateICloud(diagnosticPath string, account *Account) bool {
+	if account == nil || acceptedCheckpointReady(account.Dir, account.AppleID) || !verifiedGSACheckpointReady(account.Dir, account.AppleID) {
+		return false
+	}
+	data, err := os.ReadFile(diagnosticPath)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		return strings.Contains(line, "mobileme delegate refused status=1")
+	}
+	return false
+}
+
+func (s *Server) autoActivateAndRestart(account *Account, creds credentials) {
+	defer func() { creds.Password = "" }()
+	if account == nil || creds.Password == "" {
+		return
+	}
+	s.setLaunching(account, true)
+	s.setMessage(account, "检测到账号尚未激活 iCloud，正在自动同意条款并完成首次激活…")
+	result := s.runActivation(context.Background(), account, true, "", true)
+	if !result.OK {
+		s.setLaunching(account, false)
+		s.setMessage(account, "自动激活 iCloud 未完成（"+result.Message+"）；请在下方“激活 iCloud”卡片重试")
+		return
+	}
+	cacheSafeActionResult(account, &result)
+	s.setMessage(account, "iCloud 已自动激活，正在重新连接后台…")
+	s.setLaunching(account, false)
+	restarted := s.startInModeInternal(context.Background(), account.Dir, creds, account, false, false)
+	if !restarted.OK {
+		s.setMessage(account, "iCloud 已自动激活，但重新连接未完成："+restarted.Message)
+	}
+}
+
 func (s *Server) activationAction(parent context.Context, account *Account, accept bool, approvedTuple string) control.Result {
+	return s.runActivation(parent, account, accept, approvedTuple, false)
+}
+
+func (s *Server) runActivation(parent context.Context, account *Account, accept bool, approvedTuple string, autoApprove bool) control.Result {
 	if account == nil || !verifiedGSACheckpointReady(account.Dir, account.AppleID) {
 		return control.Result{Message: "请先完成账号密码与验证码验证", Stage: "activation-session"}
 	}
@@ -195,6 +240,9 @@ func (s *Server) activationAction(parent context.Context, account *Account, acce
 	}
 	if !accept {
 		return control.Result{OK: true, Message: "Apple 要求接受当前 iCloud 与媒体服务条款", Stage: "activation-terms", Activation: plan}
+	}
+	if autoApprove {
+		approvedTuple = activationTuple(plan)
 	}
 	if approvedTuple == "" || approvedTuple != activationTuple(plan) {
 		return control.Result{Message: "Apple 条款版本已变化，请重新查看并确认", Stage: "activation-consent", Activation: plan}

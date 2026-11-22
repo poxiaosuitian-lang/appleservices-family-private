@@ -61,3 +61,46 @@ func TestFilteredActivationEnvSetsRunAsInvokerAndStripsSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldAutoActivateICloudRequiresDelegateRefusalAndUnactivatedPET(t *testing.T) {
+	dir := t.TempDir()
+	account := &Account{ID: "06-account", AppleID: "owner@example.test", Dir: dir}
+	diag := filepath.Join(dir, "daemon.err.log")
+	if err := os.WriteFile(diag, []byte("starting...\ntrusted-device: appleservices: iCloud login: icloud: mobileme delegate refused status=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if shouldAutoActivateICloud(diag, account) {
+		t.Fatal("auto-activation allowed without verified GSA PET")
+	}
+	session := appleservices.Session{AppleID: account.AppleID, DSID: "123", Tokens: map[string]string{"com.apple.gs.idms.pet": "private"}}
+	data, _ := json.Marshal(session)
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !shouldAutoActivateICloud(diag, account) {
+		t.Fatal("expected auto-activation for unactivated account with verified PET and mobileme delegate refusal")
+	}
+	if shouldAutoActivateICloud(diag, &Account{ID: "06-account", AppleID: "other@example.test", Dir: dir}) {
+		t.Fatal("auto-activation crossed account binding")
+	}
+	if err := os.WriteFile(diag, []byte("trusted-device: gsa: ec=-22406 Enter the correct password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if shouldAutoActivateICloud(diag, account) {
+		t.Fatal("auto-activation triggered on non-delegate failure")
+	}
+	if err := os.WriteFile(diag, []byte("trusted-device: appleservices: iCloud login: icloud: mobileme delegate refused status=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	accepted, _ := json.Marshal(map[string]any{
+		"session":      map[string]any{"appleId": account.AppleID, "dsid": "123", "tokens": map[string]string{"mmeAuthToken": "private"}},
+		"adsid":        "123",
+		"service-data": map[string]any{},
+	})
+	if err := os.WriteFile(filepath.Join(dir, "icloud-accepted.json"), accepted, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if shouldAutoActivateICloud(diag, account) {
+		t.Fatal("auto-activation triggered for already activated account")
+	}
+}

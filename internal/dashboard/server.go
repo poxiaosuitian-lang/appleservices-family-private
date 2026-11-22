@@ -896,6 +896,11 @@ func (s *Server) startSavedAccount(ctx context.Context, account *Account) contro
 }
 
 func (s *Server) startInMode(ctx context.Context, dir string, creds credentials, account *Account, resume bool) control.Result {
+	allowAutoActivate := account != nil && !resume && !acceptedCheckpointReady(dir, account.AppleID)
+	return s.startInModeInternal(ctx, dir, creds, account, resume, allowAutoActivate)
+}
+
+func (s *Server) startInModeInternal(ctx context.Context, dir string, creds credentials, account *Account, resume bool, allowAutoActivate bool) control.Result {
 	if !s.launchMu.TryLock() {
 		return control.Result{Message: "正在启动，请稍等"}
 	}
@@ -978,8 +983,37 @@ func (s *Server) startInMode(ctx context.Context, dir string, creds credentials,
 	if command.Start() != nil {
 		return control.Result{Message: "后台启动失败，请检查本机依赖"}
 	}
+	var restartMu sync.Mutex
+	var restartCreds credentials
+	var wipeTimer *time.Timer
+	if allowAutoActivate && account != nil && !resume && creds.Password != "" {
+		restartCreds = creds
+		wipeTimer = time.AfterFunc(10*time.Minute, func() {
+			restartMu.Lock()
+			restartCreds.Password = ""
+			restartMu.Unlock()
+		})
+	}
 	go func() {
+		defer func() {
+			if wipeTimer != nil {
+				wipeTimer.Stop()
+			}
+			restartMu.Lock()
+			restartCreds.Password = ""
+			restartMu.Unlock()
+		}()
 		if err := command.Wait(); err != nil {
+			if allowAutoActivate && account != nil && !resume && shouldAutoActivateICloud(diagnostic.Name(), account) {
+				restartMu.Lock()
+				saved := restartCreds
+				restartCreds.Password = ""
+				restartMu.Unlock()
+				if saved.Password != "" {
+					s.autoActivateAndRestart(account, saved)
+					return
+				}
+			}
 			message := "后台异常停止，请重新连接"
 			if detail := lastProcessError(diagnostic.Name()); detail != "" {
 				message += "：" + detail
