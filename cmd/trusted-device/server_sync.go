@@ -12,17 +12,34 @@ type syncHMEClient interface {
 	Authenticate(context.Context, string, func(context.Context) (string, error)) error
 }
 
+type syncHMERepairClient interface {
+	AcceptPendingTerms(context.Context) error
+	AuthenticateAndAcceptTerms(context.Context, string, func(context.Context) (string, error)) error
+}
+
 // Sync verifies actual Web access without requiring paid storage or a family
 // cache. A successful empty alias list is valid; Apple errors still stop export.
 func loadSyncHMESession(ctx context.Context, client syncHMEClient, password string, code func(context.Context) (string, error)) (*icloud.HideMyEmailInfo, error) {
 	info, err := client.List(ctx)
-	if !errors.Is(err, icloud.ErrHMEAuthenticationRequired) {
-		return info, err
+	if errors.Is(err, icloud.ErrHMEAuthenticationRequired) {
+		err = client.Authenticate(ctx, password, code)
+		if err == nil {
+			info, err = client.List(ctx)
+		}
 	}
-	if err := client.Authenticate(ctx, password, code); err != nil {
-		return nil, err
+	if errors.Is(err, icloud.ErrHMEWebRepairRequired) {
+		if repair, ok := client.(syncHMERepairClient); ok {
+			repairErr := repair.AcceptPendingTerms(ctx)
+			if errors.Is(repairErr, icloud.ErrHMEWebRepairSessionUnavailable) {
+				repairErr = repair.AuthenticateAndAcceptTerms(ctx, password, code)
+			}
+			if repairErr != nil {
+				return nil, repairErr
+			}
+			return client.List(ctx)
+		}
 	}
-	return client.List(ctx)
+	return info, err
 }
 
 func serverSyncMailbox(info *icloud.HideMyEmailInfo) (string, error) {

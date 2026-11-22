@@ -793,6 +793,11 @@ func run() (runErr error) {
 			if err != nil {
 				return control.Result{Message: "iCloud 网页会话未通过核验，请重新连接账号后重试", Stage: "hme-server-sync"}
 			}
+			if target := ownICloudForwardTarget(info); target != "" && len(info.Aliases) > 0 && !hmeForwardMatches(info, target) {
+				if updated, fwdErr := ensureHMEICloudForward(queryCtx, *dir, appleID, hmeClient, info); fwdErr == nil && updated != nil {
+					info = updated
+				}
+			}
 			mailbox, err := serverSyncMailbox(info)
 			if err != nil {
 				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}

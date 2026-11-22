@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServerLoginOrchestration(t *testing.T) {
@@ -110,5 +111,45 @@ func TestServerLoginOrchestration(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServerLoginRetriesOnceOnTransientUpstream502(t *testing.T) {
+	previous := loginRetryDelay
+	loginRetryDelay = time.Millisecond
+	defer func() { loginRetryDelay = previous }()
+
+	loginAttempts := 0
+	challenge := strings.Repeat("b", 64)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input loginRequest
+		if json.NewDecoder(r.Body).Decode(&input) != nil {
+			t.Fatal("invalid request")
+		}
+		source := SourceID("owner@example.test")
+		switch input.Operation {
+		case "status":
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": LoginResult{SourceID: source, State: "login_required"}})
+		case "login":
+			loginAttempts++
+			if loginAttempts == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				w.Write([]byte(`{"success":false,"code":"UPSTREAM_FAILURE"}`))
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": LoginResult{SourceID: source, State: "otp_required", Challenge: challenge, DeviceCodeSupported: true}})
+		case "verify_device":
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": LoginResult{SourceID: source, State: "ready"}})
+		default:
+			t.Fatalf("unexpected operation: %s", input.Operation)
+		}
+	}))
+	defer server.Close()
+
+	result, err := loginWithClient(context.Background(), server.Client(), server.URL, strings.Repeat("k", 6), "owner@example.test", "synthetic-password", "", "", func(context.Context) (string, error) {
+		return "123456", nil
+	})
+	if err != nil || result.State != "ready" || loginAttempts != 2 {
+		t.Fatalf("expected single retry to recover transient 502, got attempts=%d result=%+v err=%v", loginAttempts, result, err)
 	}
 }

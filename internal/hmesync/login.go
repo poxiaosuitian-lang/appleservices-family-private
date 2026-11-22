@@ -50,6 +50,14 @@ func Login(ctx context.Context, base, token, appleID, password, code, challenge 
 	defer client.CloseIdleConnections()
 	return loginWithClient(ctx, client, base, token, appleID, password, code, challenge, provider)
 }
+var loginRetryDelay = 1500 * time.Millisecond
+
+type transientUpstreamError struct {
+	message string
+}
+
+func (e transientUpstreamError) Error() string { return e.message }
+
 func loginWithClient(ctx context.Context, client *http.Client, base, token, appleID, password, code, challenge string, provider CodeProvider) (*LoginResult, error) {
 	request := loginRequest{Version: 1, SourceID: SourceID(appleID), AppleID: appleID, Operation: "status"}
 	if code != "" || challenge != "" {
@@ -71,6 +79,16 @@ func loginWithClient(ctx context.Context, client *http.Client, base, token, appl
 	request.Operation = "login"
 	request.Password = password
 	result, err = loginCall(ctx, client, base, token, request)
+	var transient transientUpstreamError
+	if errors.As(err, &transient) {
+		select {
+		case <-ctx.Done():
+			request.Password = ""
+			return nil, ctx.Err()
+		case <-time.After(loginRetryDelay):
+		}
+		result, err = loginCall(ctx, client, base, token, request)
+	}
 	request.Password = ""
 	if err != nil || result.State == "ready" {
 		return result, err
@@ -147,6 +165,9 @@ func loginCall(ctx context.Context, client *http.Client, base, token string, pay
 			message = "认证请求已限流，请稍后手动重试"
 		case "IMPORT_BUSY":
 			message = "服务器正在处理认证，请稍后重试"
+		}
+		if (response.StatusCode == http.StatusBadGateway || response.StatusCode == http.StatusServiceUnavailable) && wire.Code == "UPSTREAM_FAILURE" {
+			return nil, transientUpstreamError{message: message}
 		}
 		return nil, errors.New(message)
 	}

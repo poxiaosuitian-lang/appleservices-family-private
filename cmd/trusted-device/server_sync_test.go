@@ -77,3 +77,43 @@ func TestSyncMailboxRejectsAmbiguousOrMisroutedAccounts(t *testing.T) {
 		t.Fatal("valid active forwarding rejected", err)
 	}
 }
+
+type syncRepairFixture struct {
+	syncWebFixture
+	pendingErr, authRepairErr error
+	pendingCalls, authRepairs int
+}
+
+func (f *syncRepairFixture) AcceptPendingTerms(context.Context) error {
+	f.pendingCalls++
+	if f.pendingErr == nil {
+		f.listErr = nil
+	}
+	return f.pendingErr
+}
+
+func (f *syncRepairFixture) AuthenticateAndAcceptTerms(context.Context, string, func(context.Context) (string, error)) error {
+	f.authRepairs++
+	if f.authRepairErr == nil {
+		f.listErr = nil
+	}
+	return f.authRepairErr
+}
+
+func TestSyncWebSessionAcceptsPendingWebTermsAutomatically(t *testing.T) {
+	client := &syncRepairFixture{
+		syncWebFixture: syncWebFixture{
+			info:    &icloud.HideMyEmailInfo{ForwardToEmails: []string{"owner@icloud.com"}},
+			listErr: icloud.ErrHMEAuthenticationRequired,
+			authErr: icloud.ErrHMEWebRepairRequired,
+		},
+		pendingErr: icloud.ErrHMEWebRepairSessionUnavailable,
+	}
+	info, err := loadSyncHMESession(context.Background(), client, "synthetic", nil)
+	if err != nil || info != client.info {
+		t.Fatalf("expected Web repair to succeed, got info=%v err=%v", info, err)
+	}
+	if client.auths != 1 || client.pendingCalls != 1 || client.authRepairs != 1 || client.lists != 2 {
+		t.Fatalf("unexpected call counts: auths=%d pending=%d authRepairs=%d lists=%d", client.auths, client.pendingCalls, client.authRepairs, client.lists)
+	}
+}
