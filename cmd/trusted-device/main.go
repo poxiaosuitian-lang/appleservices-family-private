@@ -1230,7 +1230,7 @@ func run() (runErr error) {
 			if info, statErr := os.Stat(helper); statErr != nil || !info.Mode().IsRegular() {
 				return control.Result{Message: "家庭工具不可用", Stage: "family-worker"}
 			}
-			queryCtx, done := context.WithTimeout(actionCtx, 105*time.Second)
+			queryCtx, done := context.WithTimeout(actionCtx, 150*time.Second)
 			defer done()
 			args := []string{"-dir", *dir, "-safe-json"}
 			env := []string(nil)
@@ -1250,6 +1250,9 @@ func run() (runErr error) {
 				organizerDir := filepath.Join(accountsRoot, organizerID)
 				if filepath.Dir(organizerDir) != accountsRoot {
 					return control.Result{Message: "组织者账号目录无效", Stage: "family-binding"}
+				}
+				if readyErr := ensureOrganizerFamilyReady(queryCtx, helper, organizerDir, runFamilyHelper); readyErr != nil {
+					return control.Result{Message: readyErr.Error(), Stage: "family-organizer-setup"}
 				}
 				args = []string{"-dir", organizerDir, "-add-pool-member-dir", *dir, "-target-password-env", "-safe-json"}
 				env = []string{"APPLESERVICES_TARGET_PASSWORD=" + password}
