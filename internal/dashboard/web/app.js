@@ -140,7 +140,8 @@ function deviceVerificationNeeded(status) {
   return !!status?.running && !!status.authenticated && status.state === 'device_identity_refresh_required';
 }
 function codeIdleMessage(view) {
-  if (deviceVerificationNeeded(view?.status)) return '设备验证已失效，重新登录后可查看验证码。';
+  if (view?.local_code_available && !view?.status?.running) return '本机生成，是否有效以 Apple 验证结果为准。';
+  if (deviceVerificationNeeded(view?.status)) return '设备会话需验证，可停止后台后取本机验证码。';
   const status = view?.status || {};
   if (status.state === 'awaiting_device_code' && status.local_verification === 'request_failed') return '验证码发送请求未完成，请改用其他验证方式';
   if (status.state === 'awaiting_device_code' && status.local_verification === 'failed') return '本机验证未完成，请使用受信任设备或短信验证码';
@@ -149,7 +150,7 @@ function codeIdleMessage(view) {
 function showCode(result) {
   privateCode = result.code;
   privateCodeKind = result.code_kind || '';
-  $('codeCardTitle').textContent = privateCodeKind === 'circle' ? '设备配对码' : '登录验证码';
+  $('codeCardTitle').textContent = privateCodeKind === 'circle' ? '设备配对码' : privateCodeKind === 'local-device' ? '本机验证码' : '登录验证码';
   hideAt = new Date(result.hide_at).getTime();
   if (!Number.isFinite(hideAt)) hideAt = Date.now() + 60000;
   codeTotalMs = Math.max(1000, hideAt - Date.now());
@@ -166,7 +167,7 @@ function tickCode() {
   if (!seconds) { clearCode(); return; }
   const ratio = Math.min(1, Math.max(0, remainingMs / codeTotalMs));
   $('codeTimerFill')?.setAttribute('width', String(Math.round(ratio * 1000)));
-  $('codeDetail').textContent = (privateCodeKind === 'circle' ? '官方客户端配对码 · ' : '') + seconds + ' 秒后自动隐藏';
+  $('codeDetail').textContent = (privateCodeKind === 'circle' ? '官方客户端配对码 · ' : privateCodeKind === 'local-device' ? '本机生成 · ' : '') + seconds + ' 秒后自动隐藏';
 }
 
 function deviceIcon(device) {
@@ -908,7 +909,9 @@ function render(view) {
   $('navCount').textContent = status.device_count || '—';
 
   const storageRefreshing = autoRefreshAttemptStatus(autoRefreshKey('storage', view.storage_checked_at)) === 'refreshing';
-  $('codeButton').disabled = busy || !view.control_ready || !view.code_ready || !online || partial;
+  const offlineCode = !!view.local_code_available && !status.running;
+  $('codeButton').textContent = offlineCode ? '显示本机验证码' : '显示验证码';
+  $('codeButton').disabled = busy || (!offlineCode && (!view.control_ready || !view.code_ready || !online || partial));
   $('devicesButton').disabled = busy || !online || !view.control_ready;
   $('storageButton').disabled = busy || storageRefreshing || (!activated && (!online || !view.control_ready));
   $('subscriptionStatusButton').disabled = $('storageButton').disabled;
@@ -1193,7 +1196,7 @@ async function action(name, extra = {}, options = {}) {
       }
     }
     if (options.autoKey) autoRefreshState.delete(options.autoKey);
-    if (result.code && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionVerificationContext === verificationContext) showCode(result);
+    if (result.code && (!result.account_id || result.account_id === actionAccount) && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionVerificationContext === verificationContext) showCode(result);
     else if (!options.silent && result.stage === 'device_identity_refresh_required') notice(result.message || '设备管理需要重新验证', true);
     else if (!options.silent && result.message) notice(result.message);
     await poll();
@@ -1214,7 +1217,11 @@ async function action(name, extra = {}, options = {}) {
 }
 
 $('reloadView').addEventListener('click', poll);
-$('codeButton').addEventListener('click', () => action('code'));
+$('codeButton').addEventListener('click', () => {
+  if (current?.selected !== selectedAccount) return;
+  const local = current.local_code_available && !current.status?.running;
+  action(local ? 'local-device-code' : 'code');
+});
 $('devicesButton').addEventListener('click', () => action('devices'));
 $('renewButton').addEventListener('click', () => action('validate-account'));
 $('storageButton').addEventListener('click', () => action('storage-info'));

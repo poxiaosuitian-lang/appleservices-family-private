@@ -19,9 +19,10 @@ const web = path.join(__dirname, '../internal/dashboard/web');
       if (url.pathname === '/api/action') {
         const body = route.request().postDataJSON();
         calls.push(body.action);
-        if (body.action === 'code') return new Promise(resolve => {
+        if (['code','local-device-code'].includes(body.action)) return new Promise(resolve => {
+          const owner = url.searchParams.get('account');
           codeResponse = async () => {
-            await route.fulfill({json:{ok:true,code:'123456',hide_at:new Date(Date.now()+60000).toISOString()}});
+            await route.fulfill({json:{ok:true,code:'123456',account_id:owner,code_kind:body.action==='local-device-code'?'local-device':'',hide_at:new Date(Date.now()+60000).toISOString()}});
             resolve();
           };
         });
@@ -95,6 +96,22 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert(await page.locator('#reloginButton').isHidden());
     assert(await page.locator('#startButton').isVisible());
 
+    // Saved account-bound device data can generate a local code while logged out.
+    view.local_code_available = true; await render();
+    assert(await page.locator('#codeButton').isEnabled());
+    assert.equal(await page.locator('#codeButton').innerText(), '显示本机验证码');
+    assert.match(await page.locator('#codeDetail').innerText(), /Apple 验证结果/);
+    await page.locator('#codeButton').click();
+    assert(codeResponse);
+    await codeResponse();
+    await page.waitForFunction(() => !busy && privateCode === '123456');
+    assert.equal(calls.at(-1), 'local-device-code');
+    assert.equal(await page.locator('#codeCardTitle').innerText(), '本机验证码');
+    assert.match(await page.locator('#codeDetail').innerText(), /本机生成/);
+    assert.equal(await page.locator('#authState').innerText(), '未登录');
+    await page.evaluate(() => clearCode());
+    view.local_code_available = false; await render();
+
     // Only a fully authenticated worker may expose a code, even if a stale view says ready.
     view.code_ready = true; await render();
     assert(await page.locator('#codeButton').isDisabled());
@@ -104,7 +121,7 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await render();
     assert.equal(await page.locator('#statusBadge').innerText(), '设备需验证');
     assert.match(await page.locator('#accountList').innerText(), /设备需验证/);
-    assert.match(await page.locator('#codeDetail').innerText(), /设备验证已失效/);
+    assert.match(await page.locator('#codeDetail').innerText(), /设备会话需验证/);
     assert(await page.locator('#codeButton').isDisabled());
     view.status.state = view.accounts[0].state = 'online';
     view.status.pairing_state = 'awaiting_client_proof'; await render();
@@ -142,6 +159,17 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert.equal(await page.evaluate(() => privateCode),'');
     assert(await page.locator('#copyButton').isDisabled());
     assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes('123456')),false);
+    // A late local-code response must not appear under a different account.
+    view.local_code_available = true;
+    view.status = {pid:2,running:false,authenticated:false,state:'failed'};
+    await render();
+    await page.locator('#codeButton').click();
+    view = {...view,selected:'third-fixture',account:'Third fixture'};
+    await render();
+    await codeResponse();
+    await page.waitForFunction(() => !busy);
+    assert.equal(await page.evaluate(() => privateCode),'');
+    assert(await page.locator('#copyButton').isDisabled());
     assert.deepEqual(errors,[]);
     console.log('PASS: device/SMS verification labels, local failure states, credential isolation and no automatic OTP submission (offline)');
   } finally { await browser.close(); }

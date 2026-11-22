@@ -26,6 +26,7 @@ import (
 	"github.com/Laky-64/appleservices/internal/backgroundexec"
 	"github.com/Laky-64/appleservices/internal/control"
 	"github.com/Laky-64/appleservices/internal/mailsetup"
+	"github.com/Laky-64/appleservices/nativeadi"
 )
 
 //go:embed web/*
@@ -57,7 +58,8 @@ type Server struct {
 	registryNote string
 	// provisionMacPush is replaceable only by package tests. Production uses
 	// the pinned native Mac APS bootstrap configured by cmd/dashboard.
-	provisionMacPush func(context.Context, string) error
+	provisionMacPush  func(context.Context, string) error
+	generateLocalCode func(context.Context, nativeadi.Config) (string, error)
 }
 type Status struct {
 	PasswordRemembered   bool      `json:"password_remembered"`
@@ -91,6 +93,7 @@ type view struct {
 	Devices                      []control.Device                `json:"devices"`
 	Pending                      *control.Pending                `json:"pending"`
 	CodeReady                    bool                            `json:"code_ready"`
+	LocalCodeAvailable           bool                            `json:"local_code_available"`
 	ControlReady                 bool                            `json:"control_ready"`
 	Launching                    bool                            `json:"launching"`
 	Message                      string                          `json:"message"`
@@ -130,6 +133,7 @@ func New(config Config) (*Server, error) {
 	}
 	s := &Server{config: config, listener: listener, token: hex.EncodeToString(key)}
 	s.provisionMacPush = s.runMacPushProvisioner
+	s.generateLocalCode = generateLocalDeviceCode
 	if entries, err := loadRegistry(config.Dir, config.Dir); err != nil {
 		// Surfaced rather than swallowed: an unreadable registry previously
 		// made the panel look like it had no accounts at all.
@@ -850,6 +854,10 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 			result.ControlReady = true
 		}
 	}
+	if account != nil && !result.Status.Running {
+		_, localErr := localDeviceConfig(account)
+		result.LocalCodeAvailable = localErr == nil
+	}
 	return result
 }
 func (s *Server) Start(ctx context.Context, creds credentials) control.Result {
@@ -1259,6 +1267,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			var result control.Result
+			if action.Action == "local-device-code" {
+				result = s.localDeviceCodeAction(r.Context(), selected)
+				json.NewEncoder(w).Encode(result)
+				return
+			}
 			if selected != nil && action.Action == "family-remove-member" {
 				result = s.removeFamilyMember(r.Context(), selected, action.Code)
 				json.NewEncoder(w).Encode(result)
