@@ -653,8 +653,11 @@ function openLogin(mode) {
   loginAccount = selectedAccount;
   $('appleID').value = mode === 'reconnect' ? (current?.login_account || '') : '';
   $('appleID').readOnly = mode === 'reconnect' && !!$('appleID').value;
+  const hasSavedPassword = mode === 'reconnect' && !!current?.status?.password_remembered;
   $('password').value = '';
-  $('rememberPassword').checked = mode === 'reconnect' && !!current?.status?.password_remembered;
+  $('password').required = !hasSavedPassword;
+  $('password').placeholder = hasSavedPassword ? '已加密记住密码，留空直接复用（或输入新密码）' : '输入 Apple 账户密码';
+  $('rememberPassword').checked = hasSavedPassword;
   $('twofactor').value = 'trusted-device';
   $('loginDialog').querySelector('h2').textContent = mode === 'add' ? '添加 Apple 账户' : '重新连接当前账号';
   renderLoginState();

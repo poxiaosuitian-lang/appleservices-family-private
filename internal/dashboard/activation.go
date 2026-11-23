@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -142,6 +143,41 @@ func isActivationUnauthorized(output []byte) bool {
 	return strings.Contains(string(output), `"HTTP":401`)
 }
 
+var activationDetailPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`HTTP\s+\d{3}`),
+	regexp.MustCompile(`ErrorID=[A-Za-z0-9_.-]+`),
+	regexp.MustCompile(`reason-code=[0-9A-Za-z_-]+`),
+	regexp.MustCompile(`status=[0-9-]+`),
+	regexp.MustCompile(`Account limit reached\.?`),
+}
+
+func safeActivationDetail(output []byte) string {
+	var parts []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(output), "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if trimmed == "" || strings.Contains(trimmed, "@") || strings.Contains(lower, "password") ||
+			strings.Contains(lower, "secret") || strings.Contains(lower, "cookie") || strings.Contains(lower, "dsid") ||
+			(strings.Contains(lower, "token") && !strings.Contains(lower, "mme-token-present=")) {
+			continue
+		}
+		for _, re := range activationDetailPatterns {
+			for _, match := range re.FindAllString(trimmed, -1) {
+				if !seen[match] {
+					seen[match] = true
+					parts = append(parts, match)
+				}
+			}
+		}
+	}
+	detail := strings.Join(parts, ", ")
+	if len(detail) > 120 {
+		detail = detail[:120]
+	}
+	return detail
+}
+
 func replaceGSACheckpoint(source, destination, appleID string) error {
 	data, err := os.ReadFile(source)
 	if err != nil || len(data) == 0 || len(data) > 2<<20 {
@@ -172,7 +208,7 @@ func replaceGSACheckpoint(source, destination, appleID string) error {
 	return os.Rename(cleanup, destination)
 }
 
-func (s *Server) activationPlan(ctx context.Context, account *Account, runDir, password string) (*control.ActivationInfo, string, error) {
+func (s *Server) activationPlan(ctx context.Context, account *Account, runDir, password string) (*control.ActivationInfo, string, bool, error) {
 	root := s.activationRoot()
 	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
 	resumePath := filepath.Join(account.Dir, "session.json")
@@ -190,17 +226,23 @@ func (s *Server) activationPlan(ctx context.Context, account *Account, runDir, p
 					plan, planErr := parseActivationPlan(refreshedOut)
 					if planErr == nil {
 						_ = replaceGSACheckpoint(refreshed, resumePath, account.AppleID)
-						return plan, refreshed, nil
+						return plan, refreshed, true, nil
 					}
-					return nil, "", planErr
+					return nil, "", false, planErr
+				}
+				if isActivationUnauthorized(refreshedOut) && replaceGSACheckpoint(refreshed, resumePath, account.AppleID) == nil {
+					return nil, refreshed, false, nil
 				}
 			}
-			return nil, "", errors.New("Apple 登录凭证已过期，请点击“重新连接”重新验证后再激活")
+			if info, statErr := os.Stat(resumePath); statErr == nil && time.Since(info.ModTime()) < 2*time.Minute {
+				return nil, resumePath, false, nil
+			}
+			return nil, "", false, errors.New("Apple 登录凭证已过期，请点击“重新连接”重新验证后再激活")
 		}
-		return nil, "", errors.New("无法读取 Apple 当前条款状态")
+		return nil, "", false, errors.New("无法读取 Apple 当前条款状态")
 	}
 	plan, err := parseActivationPlan(output)
-	return plan, resumePath, err
+	return plan, resumePath, err == nil, err
 }
 
 func readTermsReceipt(path string) bool {
@@ -270,7 +312,11 @@ func (s *Server) autoActivateAndRestart(account *Account, creds credentials) {
 }
 
 func (s *Server) activationAction(parent context.Context, account *Account, accept bool, approvedTuple string) control.Result {
-	return s.runActivation(parent, account, accept, approvedTuple, false, "")
+	password := ""
+	if account != nil {
+		password, _ = loadSavedLoginPassword(account.Dir, account.AppleID)
+	}
+	return s.runActivation(parent, account, accept, approvedTuple, false, password)
 }
 
 func (s *Server) runActivation(parent context.Context, account *Account, accept bool, approvedTuple string, autoApprove bool, password string) control.Result {
@@ -295,25 +341,27 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	defer os.RemoveAll(runDir)
 	ctx, cancel := context.WithTimeout(parent, 3*time.Minute)
 	defer cancel()
-	plan, resumePath, err := s.activationPlan(ctx, account, runDir, password)
+	plan, resumePath, termsRequired, err := s.activationPlan(ctx, account, runDir, password)
 	if err != nil {
 		return control.Result{Message: err.Error(), Stage: "activation-plan"}
 	}
-	if !accept {
+	if !accept && termsRequired {
 		return control.Result{OK: true, Message: "Apple 要求接受当前 iCloud 与媒体服务条款", Stage: "activation-terms", Activation: plan}
 	}
-	if autoApprove {
-		approvedTuple = activationTuple(plan)
-	}
-	if approvedTuple == "" || approvedTuple != activationTuple(plan) {
-		return control.Result{Message: "Apple 条款版本已变化，请重新查看并确认", Stage: "activation-consent", Activation: plan}
-	}
 	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
-	termsDump := filepath.Join(runDir, "terms.html")
-	_, _ = runActivationCommand(ctx, root, account.AppleID, helper,
-		"-dir", account.Dir, "-resume", resumePath, "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
-	if !readTermsReceipt(termsDump + ".update.json") {
-		return control.Result{Message: "Apple 未确认条款接受状态", Stage: "activation-terms", Activation: plan}
+	if termsRequired {
+		if autoApprove {
+			approvedTuple = activationTuple(plan)
+		}
+		if approvedTuple == "" || approvedTuple != activationTuple(plan) {
+			return control.Result{Message: "Apple 条款版本已变化，请重新查看并确认", Stage: "activation-consent", Activation: plan}
+		}
+		termsDump := filepath.Join(runDir, "terms.html")
+		_, _ = runActivationCommand(ctx, root, account.AppleID, helper,
+			"-dir", account.Dir, "-resume", resumePath, "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
+		if !readTermsReceipt(termsDump + ".update.json") {
+			return control.Result{Message: "Apple 未确认条款接受状态", Stage: "activation-terms", Activation: plan}
+		}
 	}
 	runtimeSource := filepath.Join(root, ".cache", "mac-nac-runtime")
 	runtimeCopy := filepath.Join(runDir, "nac-runtime")
@@ -329,11 +377,18 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 		return control.Result{Message: "Mac NAC 生成未完成", Stage: "activation-nac"}
 	}
 	checkpoint := filepath.Join(runDir, "icloud-accepted.json")
-	delegateOutput, delegateErr := runActivationCommand(ctx, root, account.AppleID, helper,
-		"-dir", account.Dir, "-resume", resumePath, "-delegate-only", "-terms-accepted",
-		"-nac-validation", validation, "-dump", filepath.Join(runDir, "delegate.plist"), "-icloud-checkpoint", checkpoint)
+	delegateArgs := []string{"-dir", account.Dir, "-resume", resumePath, "-delegate-only"}
+	if termsRequired {
+		delegateArgs = append(delegateArgs, "-terms-accepted")
+	}
+	delegateArgs = append(delegateArgs, "-nac-validation", validation, "-dump", filepath.Join(runDir, "delegate.plist"), "-icloud-checkpoint", checkpoint)
+	delegateOutput, delegateErr := runActivationCommand(ctx, root, account.AppleID, helper, delegateArgs...)
 	if delegateErr != nil || !strings.Contains(string(delegateOutput), "delegate accepted; mme-token-present=true") || !strings.Contains(string(delegateOutput), "quota accepted;") {
-		return control.Result{Message: "Apple 尚未接受 Mac v2/NAC 激活", Stage: "activation-delegate"}
+		message := "Apple 尚未接受 Mac v2/NAC 激活"
+		if detail := safeActivationDetail(delegateOutput); detail != "" {
+			message += "（" + detail + "）"
+		}
+		return control.Result{Message: message, Stage: "activation-delegate"}
 	}
 	destination := filepath.Join(account.Dir, "icloud-accepted.json")
 	if err := installAcceptedCheckpoint(checkpoint, destination); err != nil && !acceptedCheckpointReady(account.Dir, account.AppleID) {
@@ -345,6 +400,10 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	}
 	result.Stage = "activation-completed"
 	result.Message = "iCloud 条款、Mac NAC、delegate 与配额验收均已完成"
-	result.Activation = &control.ActivationInfo{Completed: true, Region: plan.Region, ICloudVersion: plan.ICloudVersion, MediaVersion: plan.MediaVersion, ICloudTermsURL: plan.ICloudTermsURL, MediaTermsURL: plan.MediaTermsURL}
+	if plan != nil {
+		result.Activation = &control.ActivationInfo{Completed: true, Region: plan.Region, ICloudVersion: plan.ICloudVersion, MediaVersion: plan.MediaVersion, ICloudTermsURL: plan.ICloudTermsURL, MediaTermsURL: plan.MediaTermsURL}
+	} else {
+		result.Activation = &control.ActivationInfo{Completed: true}
+	}
 	return result
 }

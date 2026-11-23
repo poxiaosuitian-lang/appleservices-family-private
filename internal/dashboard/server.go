@@ -814,6 +814,9 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 		result.SecurityQuestions = readSecurityQuestionsStatus(account)
 		result.ICloudActivated = acceptedCheckpointReady(account.Dir, account.AppleID)
 		result.ActivationReady = !result.ICloudActivated && verifiedGSACheckpointReady(account.Dir, account.AppleID)
+		if !result.Status.PasswordRemembered && hasSavedLoginPassword(account.Dir, account.AppleID) {
+			result.Status.PasswordRemembered = true
+		}
 		if family, checkedAt, stale := readFamilyCache(account); family != nil {
 			s.resolveCachedFamilyOrganizer(account, family)
 			result.Family = family
@@ -853,6 +856,9 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 			result.HideMyEmailAvailable = slices.Contains(live.Capabilities, "hide-my-email")
 			result.ControlReady = true
 		}
+	}
+	if account != nil && !result.Status.PasswordRemembered && hasSavedLoginPassword(account.Dir, account.AppleID) {
+		result.Status.PasswordRemembered = true
 	}
 	if account != nil && !result.Status.Running {
 		_, localErr := localDeviceConfig(account)
@@ -901,11 +907,17 @@ func (s *Server) startInMode(ctx context.Context, dir string, creds credentials,
 }
 
 func (s *Server) startInModeInternal(ctx context.Context, dir string, creds credentials, account *Account, resume bool, allowAutoActivate bool) control.Result {
+	defer func() { creds.Password = "" }()
 	if !s.launchMu.TryLock() {
 		return control.Result{Message: "正在启动，请稍等"}
 	}
 	defer s.launchMu.Unlock()
 	s.setMessage(account, "")
+	if !resume && creds.Password == "" && strings.TrimSpace(creds.AppleID) != "" {
+		if saved, err := loadSavedLoginPassword(dir, creds.AppleID); err == nil && saved != "" {
+			creds.Password = saved
+		}
+	}
 	current := s.readStatusFrom(dir)
 	if current.Running {
 		// A password supplied for an already-running account is an explicit

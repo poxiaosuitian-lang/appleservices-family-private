@@ -147,6 +147,20 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     await delayedLogin({ ok: true, message: 'Fixture reconnect started' });
     await page.waitForFunction(() => !busy && !pollRequest);
 
+    // Remembered password allows blank-password reconnect without re-typing it.
+    const withSaved = snapshot('fixture-0');
+    withSaved.status.password_remembered = true;
+    await page.evaluate(v => { render(v); openLogin('reconnect'); }, withSaved);
+    assert.equal(await page.locator('#password').getAttribute('required'), null);
+    assert.equal(await page.locator('#rememberPassword').isChecked(), true);
+    await page.locator('#loginForm button[type=submit]').click();
+    await page.waitForFunction(() => loginSubmitting);
+    assert.equal(mutations.at(-1).path, '/api/start');
+    assert.equal(mutations.at(-1).body.password, '');
+    assert.equal(mutations.at(-1).body.remember_password, true);
+    await delayedLogin({ ok: true, message: 'Reused saved password' });
+    await page.waitForFunction(() => !busy && !pollRequest);
+
     // Sidebar switching also supersedes a slow read without waiting for the timer.
     holdView = true;
     const pendingView = page.waitForRequest(request => request.url().includes('/api/view'));

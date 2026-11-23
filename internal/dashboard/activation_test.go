@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	appleservices "github.com/Laky-64/appleservices"
@@ -143,5 +144,26 @@ func TestActivationUnauthorizedDetectionAndCheckpointReplace(t *testing.T) {
 	}
 	if err := replaceGSACheckpoint(src, dst, "owner@example.test"); err == nil {
 		t.Fatal("replaced checkpoint without PET")
+	}
+}
+
+func TestSafeActivationDetailPreservesCodesAndStripsSecrets(t *testing.T) {
+	output := []byte(`
+APPLESERVICES_APPLEID=owner@example.test
+secret token=super-secret-pet
+icloud: /setup/signin/v2/login refused (HTTP 401) ErrorID=UNAUTHORIZED protocolVersion=2
+icloud: /setup/signin/v2/login refused (HTTP 400) reason-code=3005
+Account limit reached. status=1
+`)
+	got := safeActivationDetail(output)
+	for _, want := range []string{"HTTP 401", "ErrorID=UNAUTHORIZED", "HTTP 400", "reason-code=3005", "Account limit reached.", "status=1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("safeActivationDetail(%q) missing %q", got, want)
+		}
+	}
+	for _, secret := range []string{"owner@example.test", "super-secret-pet", "secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("safeActivationDetail leaked sensitive value %q: %q", secret, got)
+		}
 	}
 }

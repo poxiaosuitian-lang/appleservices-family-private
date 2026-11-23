@@ -428,11 +428,33 @@ func run() (runErr error) {
 			return err
 		}
 	}
+	persistPassword := func() error {
+		if *forgetPassword {
+			if err := store.ForgetLoginPassword(); err != nil {
+				return errors.New("could not remove protected login credential")
+			}
+			passwordRemembered = false
+			status.PasswordRemembered = false
+			return nil
+		}
+		if (*rememberPassword || passwordRemembered) && password != "" {
+			protected, ok := any(store).(loginPasswordStore)
+			if !ok || protected.SaveLoginPassword(appleID, password) != nil {
+				return errors.New("could not save Windows protected login credential")
+			}
+			passwordRemembered = true
+			status.PasswordRemembered = true
+		}
+		return nil
+	}
 	client, err := login.Client()
 	if ctx.Err() != nil {
 		return nil
 	}
 	if err != nil {
+		// GSA/2FA may already have written a verified account-bound checkpoint
+		// before an unactivated iCloud account fails delegate exchange.
+		_ = persistPassword()
 		return err
 	}
 	var active maintainedLogin = login
@@ -474,19 +496,9 @@ func run() (runErr error) {
 	if err := active.SaveSession(); err != nil {
 		return err
 	}
-	if *forgetPassword {
-		if err := store.ForgetLoginPassword(); err != nil {
-			return errors.New("could not remove protected login credential")
-		}
-		passwordRemembered = false
-	} else if *rememberPassword || passwordRemembered {
-		protected, ok := any(store).(loginPasswordStore)
-		if !ok || protected.SaveLoginPassword(appleID, password) != nil {
-			return errors.New("could not save Windows protected login credential")
-		}
-		passwordRemembered = true
+	if err := persistPassword(); err != nil {
+		return err
 	}
-	status.PasswordRemembered = passwordRemembered
 	reconnect.blocked = false
 	deviceManagementExpired := deviceAuthenticationExpired(err)
 	if *resumeSession && !deviceManagementExpired {
