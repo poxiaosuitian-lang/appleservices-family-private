@@ -65,8 +65,8 @@ func (b *fakeBackend) SubmitSMSCode(_, _, _ string) error {
 	b.submits = append(b.submits, SMS)
 	return b.submitErr
 }
-func (b *fakeBackend) Snapshot(dsid string, _ map[string]string) (gsa.Session, error) {
-	return gsa.Session{DSID: dsid, Cookies: map[string][]gsa.CookieKV{
+func (b *fakeBackend) Snapshot(dsid string, tokens map[string]string) (gsa.Session, error) {
+	return gsa.Session{DSID: dsid, Tokens: tokens, Cookies: map[string][]gsa.CookieKV{
 		"https://gsa.apple.com/auth": {{Name: "test-cookie", Value: "test-value"}},
 	}}, nil
 }
@@ -398,6 +398,9 @@ func TestRejectedVerificationHeaderSessionRefreshesOnce(t *testing.T) {
 			_, err = l.Client()
 			if (err != nil) != rejectedAgain || b.calls != 2 || calls != 2 || len(b.submits) != 1 || len(b.requests) != 0 {
 				t.Fatalf("unexpected recovery: err=%v logins=%d delegates=%d", err, b.calls, calls)
+			}
+			if s.session == nil || s.session.Tokens["com.apple.gs.idms.pet"] != "fresh-pet" {
+				t.Fatalf("refreshed GSA PET was not checkpointed: %#v", s.session)
 			}
 		})
 	}

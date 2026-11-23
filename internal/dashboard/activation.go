@@ -84,10 +84,18 @@ func filteredActivationEnv(appleID string) []string {
 }
 
 func runActivationCommand(ctx context.Context, root, appleID, executable string, args ...string) ([]byte, error) {
+	return runActivationCommandWithPassword(ctx, root, appleID, "", executable, args...)
+}
+
+func runActivationCommandWithPassword(ctx context.Context, root, appleID, password, executable string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, executable, args...)
 	configureProcess(command)
 	command.Dir = root
-	command.Env = filteredActivationEnv(appleID)
+	env := filteredActivationEnv(appleID)
+	if password != "" {
+		env = append(env, "APPLESERVICES_PASSWORD="+password)
+	}
+	command.Env = env
 	output, err := command.CombinedOutput()
 	if len(output) > 256<<10 {
 		return nil, errors.New("激活组件返回内容过大")
@@ -130,16 +138,69 @@ func (s *Server) activationRoot() string {
 	return filepath.Dir(filepath.Dir(s.config.MacPushSetup))
 }
 
-func (s *Server) activationPlan(ctx context.Context, account *Account, runDir string) (*control.ActivationInfo, error) {
+func isActivationUnauthorized(output []byte) bool {
+	return strings.Contains(string(output), `"HTTP":401`)
+}
+
+func replaceGSACheckpoint(source, destination, appleID string) error {
+	data, err := os.ReadFile(source)
+	if err != nil || len(data) == 0 || len(data) > 2<<20 {
+		return errors.New("Apple 验证会话不可用")
+	}
+	var session appleservices.Session
+	if json.Unmarshal(data, &session) != nil || !strings.EqualFold(session.AppleID, appleID) || session.DSID == "" || session.Tokens["com.apple.gs.idms.pet"] == "" {
+		return errors.New("Apple 验证会话与当前账号不匹配")
+	}
+	file, err := os.CreateTemp(filepath.Dir(destination), ".session-*.tmp")
+	if err != nil {
+		return err
+	}
+	cleanup := file.Name()
+	defer os.Remove(cleanup)
+	if err = file.Chmod(0600); err == nil {
+		_, err = file.Write(data)
+	}
+	if err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(cleanup, destination)
+}
+
+func (s *Server) activationPlan(ctx context.Context, account *Account, runDir, password string) (*control.ActivationInfo, string, error) {
 	root := s.activationRoot()
 	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
+	resumePath := filepath.Join(account.Dir, "session.json")
 	dump := filepath.Join(runDir, "setup.html")
 	output, err := runActivationCommand(ctx, root, account.AppleID, helper,
-		"-dir", account.Dir, "-resume", filepath.Join(account.Dir, "session.json"), "-dump", dump)
+		"-dir", account.Dir, "-resume", resumePath, "-dump", dump)
 	if err != nil {
-		return nil, errors.New("无法读取 Apple 当前条款状态")
+		if isActivationUnauthorized(output) {
+			if password != "" {
+				refreshed := filepath.Join(runDir, "gsa-refreshed.json")
+				refreshDump := filepath.Join(runDir, "setup-refreshed.html")
+				refreshedOut, refreshErr := runActivationCommandWithPassword(ctx, root, account.AppleID, password, helper,
+					"-dir", account.Dir, "-checkpoint", refreshed, "-dump", refreshDump)
+				if refreshErr == nil {
+					plan, planErr := parseActivationPlan(refreshedOut)
+					if planErr == nil {
+						_ = replaceGSACheckpoint(refreshed, resumePath, account.AppleID)
+						return plan, refreshed, nil
+					}
+					return nil, "", planErr
+				}
+			}
+			return nil, "", errors.New("Apple 登录凭证已过期，请点击“重新连接”重新验证后再激活")
+		}
+		return nil, "", errors.New("无法读取 Apple 当前条款状态")
 	}
-	return parseActivationPlan(output)
+	plan, err := parseActivationPlan(output)
+	return plan, resumePath, err
 }
 
 func readTermsReceipt(path string) bool {
@@ -193,7 +254,7 @@ func (s *Server) autoActivateAndRestart(account *Account, creds credentials) {
 	}
 	s.setLaunching(account, true)
 	s.setMessage(account, "检测到账号尚未激活 iCloud，正在自动同意条款并完成首次激活…")
-	result := s.runActivation(context.Background(), account, true, "", true)
+	result := s.runActivation(context.Background(), account, true, "", true, creds.Password)
 	if !result.OK {
 		s.setLaunching(account, false)
 		s.setMessage(account, "自动激活 iCloud 未完成（"+result.Message+"）；请在下方“激活 iCloud”卡片重试")
@@ -209,10 +270,10 @@ func (s *Server) autoActivateAndRestart(account *Account, creds credentials) {
 }
 
 func (s *Server) activationAction(parent context.Context, account *Account, accept bool, approvedTuple string) control.Result {
-	return s.runActivation(parent, account, accept, approvedTuple, false)
+	return s.runActivation(parent, account, accept, approvedTuple, false, "")
 }
 
-func (s *Server) runActivation(parent context.Context, account *Account, accept bool, approvedTuple string, autoApprove bool) control.Result {
+func (s *Server) runActivation(parent context.Context, account *Account, accept bool, approvedTuple string, autoApprove bool, password string) control.Result {
 	if account == nil || !verifiedGSACheckpointReady(account.Dir, account.AppleID) {
 		return control.Result{Message: "请先完成账号密码与验证码验证", Stage: "activation-session"}
 	}
@@ -234,7 +295,7 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	defer os.RemoveAll(runDir)
 	ctx, cancel := context.WithTimeout(parent, 3*time.Minute)
 	defer cancel()
-	plan, err := s.activationPlan(ctx, account, runDir)
+	plan, resumePath, err := s.activationPlan(ctx, account, runDir, password)
 	if err != nil {
 		return control.Result{Message: err.Error(), Stage: "activation-plan"}
 	}
@@ -250,7 +311,7 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
 	termsDump := filepath.Join(runDir, "terms.html")
 	_, _ = runActivationCommand(ctx, root, account.AppleID, helper,
-		"-dir", account.Dir, "-resume", filepath.Join(account.Dir, "session.json"), "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
+		"-dir", account.Dir, "-resume", resumePath, "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
 	if !readTermsReceipt(termsDump + ".update.json") {
 		return control.Result{Message: "Apple 未确认条款接受状态", Stage: "activation-terms", Activation: plan}
 	}
@@ -269,7 +330,7 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	}
 	checkpoint := filepath.Join(runDir, "icloud-accepted.json")
 	delegateOutput, delegateErr := runActivationCommand(ctx, root, account.AppleID, helper,
-		"-dir", account.Dir, "-resume", filepath.Join(account.Dir, "session.json"), "-delegate-only", "-terms-accepted",
+		"-dir", account.Dir, "-resume", resumePath, "-delegate-only", "-terms-accepted",
 		"-nac-validation", validation, "-dump", filepath.Join(runDir, "delegate.plist"), "-icloud-checkpoint", checkpoint)
 	if delegateErr != nil || !strings.Contains(string(delegateOutput), "delegate accepted; mme-token-present=true") || !strings.Contains(string(delegateOutput), "quota accepted;") {
 		return control.Result{Message: "Apple 尚未接受 Mac v2/NAC 激活", Stage: "activation-delegate"}

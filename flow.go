@@ -444,6 +444,9 @@ func (l *Login) Client() (*Client, error) {
 			if l.needsTwoFactor {
 				return nil, errors.New("appleservices: Apple requires further verification after refreshing the verified session")
 			}
+			// Allow the recursive attempt to persist the refreshed full-SRP GSA
+			// session, valid PET, and aid cookie over the earlier header checkpoint.
+			l.gsaCheckpointed = false
 			return l.Client()
 		}
 		// Account-side registration can succeed without iCloud service data.

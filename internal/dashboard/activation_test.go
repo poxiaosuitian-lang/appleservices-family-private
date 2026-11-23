@@ -104,3 +104,44 @@ func TestShouldAutoActivateICloudRequiresDelegateRefusalAndUnactivatedPET(t *tes
 		t.Fatal("auto-activation triggered for already activated account")
 	}
 }
+
+func TestActivationUnauthorizedDetectionAndCheckpointReplace(t *testing.T) {
+	if !isActivationUnauthorized([]byte(`{"HTTP":401,"bytes":0,"gsa-authenticated":true}`)) {
+		t.Fatal("failed to detect HTTP 401 output")
+	}
+	if isActivationUnauthorized([]byte(`{"HTTP":200,"bytes":123}`)) {
+		t.Fatal("HTTP 200 misclassified as unauthorized")
+	}
+
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "session.json")
+	src := filepath.Join(dir, "refreshed.json")
+	valid, _ := json.Marshal(appleservices.Session{
+		AppleID: "owner@example.test",
+		DSID:    "dsid-1",
+		Tokens:  map[string]string{"com.apple.gs.idms.pet": "fresh-pet"},
+	})
+	if err := os.WriteFile(src, valid, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceGSACheckpoint(src, dst, "OWNER@example.test"); err != nil {
+		t.Fatalf("unexpected error replacing checkpoint: %v", err)
+	}
+	if !verifiedGSACheckpointReady(dir, "owner@example.test") {
+		t.Fatal("replaced checkpoint failed readiness check")
+	}
+	if err := replaceGSACheckpoint(src, dst, "other@example.test"); err == nil {
+		t.Fatal("replaced checkpoint across mismatched account")
+	}
+	missingPET, _ := json.Marshal(appleservices.Session{
+		AppleID: "owner@example.test",
+		DSID:    "dsid-1",
+		Tokens:  map[string]string{},
+	})
+	if err := os.WriteFile(src, missingPET, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceGSACheckpoint(src, dst, "owner@example.test"); err == nil {
+		t.Fatal("replaced checkpoint without PET")
+	}
+}
