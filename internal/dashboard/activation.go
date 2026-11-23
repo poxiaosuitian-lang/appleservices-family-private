@@ -143,6 +143,20 @@ func isActivationUnauthorized(output []byte) bool {
 	return strings.Contains(string(output), `"HTTP":401`)
 }
 
+func isActivationTermsUpdateRequired(output []byte) bool {
+	return strings.Contains(string(output), "MOBILEME_TERMS_OF_SERVICE_UPDATE")
+}
+
+func isActivationDelegateUnauthorized(output []byte) bool {
+	return strings.Contains(string(output), "HTTP 401") || strings.Contains(string(output), "ErrorID=UNAUTHORIZED")
+}
+
+func activationDelegateSucceeded(output []byte, err error) bool {
+	return err == nil &&
+		strings.Contains(string(output), "delegate accepted; mme-token-present=true") &&
+		strings.Contains(string(output), "quota accepted;")
+}
+
 var activationDetailPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`HTTP\s+\d{3}`),
 	regexp.MustCompile(`ErrorID=[A-Za-z0-9_.-]+`),
@@ -305,10 +319,69 @@ func (s *Server) autoActivateAndRestart(account *Account, creds credentials) {
 	cacheSafeActionResult(account, &result)
 	s.setMessage(account, "iCloud 已自动激活，正在重新连接后台…")
 	s.setLaunching(account, false)
-	restarted := s.startInModeInternal(context.Background(), account.Dir, creds, account, false, false)
+	restarted := s.startInModeInternal(context.Background(), account.Dir, creds, account, true, false)
 	if !restarted.OK {
 		s.setMessage(account, "iCloud 已自动激活，但重新连接未完成："+restarted.Message)
 	}
+}
+
+func (s *Server) acceptActivationTerms(ctx context.Context, root string, account *Account, resumePath, approvedTuple, workDir string) bool {
+	if err := os.MkdirAll(workDir, 0700); err != nil {
+		return false
+	}
+	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
+	termsDump := filepath.Join(workDir, "terms.html")
+	_, _ = runActivationCommand(ctx, root, account.AppleID, helper,
+		"-dir", account.Dir, "-resume", resumePath, "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
+	return readTermsReceipt(termsDump + ".update.json")
+}
+
+func (s *Server) generateActivationNAC(ctx context.Context, root string, account *Account, workDir string) (string, error) {
+	if err := os.MkdirAll(workDir, 0700); err != nil {
+		return "", err
+	}
+	runtimeSource := filepath.Join(root, ".cache", "mac-nac-runtime")
+	runtimeCopy := filepath.Join(workDir, "nac-runtime")
+	if err := copyActivationTree(runtimeSource, runtimeCopy); err != nil {
+		return "", errors.New("无法准备 Mac NAC 运行时")
+	}
+	validation := filepath.Join(workDir, "nac-validation.bin")
+	nacOutput, nacErr := runActivationCommand(ctx, root, account.AppleID, s.config.Python,
+		filepath.Join(root, "tools", "mac-nac-check.py"), "--profile", filepath.Join(account.Dir, "native-adi", "hw_info.plist"),
+		"--runtime", runtimeCopy, "--encrypt-dll", filepath.Join(root, ".cache", "activation-source-review", "mac-io-encrypt.dll"),
+		"--validation-out", validation, "--synthetic-missing-board-fields", "--transport", filepath.Join(filepath.Dir(s.config.Worker), "nacexchange.exe"))
+	if nacErr != nil || !strings.Contains(string(nacOutput), `"stage": "NACSign"`) {
+		return "", errors.New("Mac NAC 生成未完成")
+	}
+	return validation, nil
+}
+
+func (s *Server) submitActivationDelegate(ctx context.Context, root string, account *Account, resumePath, validationPath, workDir string, termsAccepted bool, password string) (string, []byte, error) {
+	if err := os.MkdirAll(workDir, 0700); err != nil {
+		return "", nil, err
+	}
+	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
+	buildArgs := func(authArgs []string, dumpName, outCheckpoint string) []string {
+		args := append([]string{"-dir", account.Dir}, authArgs...)
+		args = append(args, "-delegate-only")
+		if termsAccepted {
+			args = append(args, "-terms-accepted")
+		}
+		return append(args, "-nac-validation", validationPath, "-dump", filepath.Join(workDir, dumpName), "-icloud-checkpoint", outCheckpoint)
+	}
+	checkpoint := filepath.Join(workDir, "icloud-accepted.json")
+	output, err := runActivationCommand(ctx, root, account.AppleID, helper, buildArgs([]string{"-resume", resumePath}, "delegate.plist", checkpoint)...)
+	if !activationDelegateSucceeded(output, err) && isActivationDelegateUnauthorized(output) && password != "" {
+		refreshedGSA := filepath.Join(workDir, "gsa-delegate-refreshed.json")
+		refreshedCheckpoint := filepath.Join(workDir, "icloud-accepted-refreshed.json")
+		retryOutput, retryErr := runActivationCommandWithPassword(ctx, root, account.AppleID, password, helper,
+			buildArgs([]string{"-checkpoint", refreshedGSA}, "delegate-refreshed.plist", refreshedCheckpoint)...)
+		if activationDelegateSucceeded(retryOutput, retryErr) || isActivationTermsUpdateRequired(retryOutput) {
+			_ = replaceGSACheckpoint(refreshedGSA, filepath.Join(account.Dir, "session.json"), account.AppleID)
+		}
+		return refreshedCheckpoint, retryOutput, retryErr
+	}
+	return checkpoint, output, err
 }
 
 func (s *Server) activationAction(parent context.Context, account *Account, accept bool, approvedTuple string) control.Result {
@@ -317,6 +390,33 @@ func (s *Server) activationAction(parent context.Context, account *Account, acce
 		password, _ = loadSavedLoginPassword(account.Dir, account.AppleID)
 	}
 	return s.runActivation(parent, account, accept, approvedTuple, false, password)
+}
+
+func (s *Server) runActivationAttempt(ctx context.Context, root, runDir, suffix string, account *Account, plan *control.ActivationInfo, resumePath string, termsRequired, accept, autoApprove bool, approvedTuple, password string) (string, []byte, error, *control.Result) {
+	if termsRequired {
+		if !accept {
+			res := control.Result{OK: true, Message: "Apple 要求接受当前 iCloud 与媒体服务条款", Stage: "activation-terms", Activation: plan}
+			return "", nil, nil, &res
+		}
+		if autoApprove {
+			approvedTuple = activationTuple(plan)
+		}
+		if approvedTuple == "" || approvedTuple != activationTuple(plan) {
+			res := control.Result{Message: "Apple 条款版本已变化，请重新查看并确认", Stage: "activation-consent", Activation: plan}
+			return "", nil, nil, &res
+		}
+		if !s.acceptActivationTerms(ctx, root, account, resumePath, approvedTuple, filepath.Join(runDir, "terms-"+suffix)) {
+			res := control.Result{Message: "Apple 未确认条款接受状态", Stage: "activation-terms", Activation: plan}
+			return "", nil, nil, &res
+		}
+	}
+	validation, err := s.generateActivationNAC(ctx, root, account, filepath.Join(runDir, "nac-"+suffix))
+	if err != nil {
+		res := control.Result{Message: err.Error(), Stage: "activation-nac"}
+		return "", nil, nil, &res
+	}
+	checkpoint, output, delegateErr := s.submitActivationDelegate(ctx, root, account, resumePath, validation, filepath.Join(runDir, "delegate-"+suffix), termsRequired, password)
+	return checkpoint, output, delegateErr, nil
 }
 
 func (s *Server) runActivation(parent context.Context, account *Account, accept bool, approvedTuple string, autoApprove bool, password string) control.Result {
@@ -345,45 +445,24 @@ func (s *Server) runActivation(parent context.Context, account *Account, accept 
 	if err != nil {
 		return control.Result{Message: err.Error(), Stage: "activation-plan"}
 	}
-	if !accept && termsRequired {
-		return control.Result{OK: true, Message: "Apple 要求接受当前 iCloud 与媒体服务条款", Stage: "activation-terms", Activation: plan}
+	checkpoint, delegateOutput, delegateErr, early := s.runActivationAttempt(ctx, root, runDir, "1", account, plan, resumePath, termsRequired, accept, autoApprove, approvedTuple, password)
+	if early != nil {
+		return *early
 	}
-	helper := filepath.Join(filepath.Dir(s.config.Worker), "accountsetupcheck.exe")
-	if termsRequired {
-		if autoApprove {
-			approvedTuple = activationTuple(plan)
+	if !activationDelegateSucceeded(delegateOutput, delegateErr) && !termsRequired && isActivationTermsUpdateRequired(delegateOutput) {
+		termsRetryDir := filepath.Join(runDir, "terms-retry")
+		if err := os.MkdirAll(termsRetryDir, 0700); err == nil {
+			retryPlan, retryResumePath, retryTermsRequired, retryErr := s.activationPlan(ctx, account, termsRetryDir, password)
+			if retryErr == nil && retryTermsRequired && retryPlan != nil {
+				plan, resumePath = retryPlan, retryResumePath
+				checkpoint, delegateOutput, delegateErr, early = s.runActivationAttempt(ctx, root, runDir, "2", account, plan, resumePath, true, accept, autoApprove, approvedTuple, password)
+				if early != nil {
+					return *early
+				}
+			}
 		}
-		if approvedTuple == "" || approvedTuple != activationTuple(plan) {
-			return control.Result{Message: "Apple 条款版本已变化，请重新查看并确认", Stage: "activation-consent", Activation: plan}
-		}
-		termsDump := filepath.Join(runDir, "terms.html")
-		_, _ = runActivationCommand(ctx, root, account.AppleID, helper,
-			"-dir", account.Dir, "-resume", resumePath, "-accept-terms", "-expected-terms", approvedTuple, "-dump", termsDump)
-		if !readTermsReceipt(termsDump + ".update.json") {
-			return control.Result{Message: "Apple 未确认条款接受状态", Stage: "activation-terms", Activation: plan}
-		}
 	}
-	runtimeSource := filepath.Join(root, ".cache", "mac-nac-runtime")
-	runtimeCopy := filepath.Join(runDir, "nac-runtime")
-	if err := copyActivationTree(runtimeSource, runtimeCopy); err != nil {
-		return control.Result{Message: "无法准备 Mac NAC 运行时", Stage: "activation-nac"}
-	}
-	validation := filepath.Join(runDir, "nac-validation.bin")
-	nacOutput, nacErr := runActivationCommand(ctx, root, account.AppleID, s.config.Python,
-		filepath.Join(root, "tools", "mac-nac-check.py"), "--profile", filepath.Join(account.Dir, "native-adi", "hw_info.plist"),
-		"--runtime", runtimeCopy, "--encrypt-dll", filepath.Join(root, ".cache", "activation-source-review", "mac-io-encrypt.dll"),
-		"--validation-out", validation, "--synthetic-missing-board-fields", "--transport", filepath.Join(filepath.Dir(s.config.Worker), "nacexchange.exe"))
-	if nacErr != nil || !strings.Contains(string(nacOutput), `"stage": "NACSign"`) {
-		return control.Result{Message: "Mac NAC 生成未完成", Stage: "activation-nac"}
-	}
-	checkpoint := filepath.Join(runDir, "icloud-accepted.json")
-	delegateArgs := []string{"-dir", account.Dir, "-resume", resumePath, "-delegate-only"}
-	if termsRequired {
-		delegateArgs = append(delegateArgs, "-terms-accepted")
-	}
-	delegateArgs = append(delegateArgs, "-nac-validation", validation, "-dump", filepath.Join(runDir, "delegate.plist"), "-icloud-checkpoint", checkpoint)
-	delegateOutput, delegateErr := runActivationCommand(ctx, root, account.AppleID, helper, delegateArgs...)
-	if delegateErr != nil || !strings.Contains(string(delegateOutput), "delegate accepted; mme-token-present=true") || !strings.Contains(string(delegateOutput), "quota accepted;") {
+	if !activationDelegateSucceeded(delegateOutput, delegateErr) {
 		message := "Apple 尚未接受 Mac v2/NAC 激活"
 		if detail := safeActivationDetail(delegateOutput); detail != "" {
 			message += "（" + detail + "）"

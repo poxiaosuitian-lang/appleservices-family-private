@@ -17,6 +17,11 @@ type primaryMailbox interface {
 	Ensure(context.Context, bool, func(string) error) (*icloud.PrimaryMailInfo, error)
 }
 
+type primaryMailboxTermsRepair interface {
+	AcceptPendingTerms(context.Context) error
+	AuthenticateAndAcceptTerms(context.Context, string, func(context.Context) (string, error)) error
+}
+
 func primaryMailAction(ctx context.Context, dir, appleID, password string, code func(context.Context) (string, error), checkOnly bool, client primaryMailbox) control.Result {
 	s, err := mailsetup.Load(dir, appleID)
 	if err != nil {
@@ -40,6 +45,17 @@ func primaryMailAction(ctx context.Context, dir, appleID, password string, code 
 		err = client.Authenticate(ctx, password, code)
 		if err == nil {
 			info, err = client.Check(ctx)
+		}
+	}
+	if errors.Is(err, icloud.ErrHMEWebRepairRequired) {
+		if repair, ok := client.(primaryMailboxTermsRepair); ok {
+			err = repair.AcceptPendingTerms(ctx)
+			if errors.Is(err, icloud.ErrHMEWebRepairSessionUnavailable) {
+				err = repair.AuthenticateAndAcceptTerms(ctx, password, code)
+			}
+			if err == nil {
+				info, err = client.Check(ctx)
+			}
 		}
 	}
 	if err == nil && !info.Exists && !checkOnly {

@@ -10,20 +10,44 @@ import (
 )
 
 type fakePrimaryMail struct {
-	exists, authenticated, allow bool
-	creates, auths               int
-	fail                         bool
+	exists, authenticated, allow          bool
+	termsRequired, pendingTermsAvailable  bool
+	creates, auths, pendingRepairs, repairs int
+	fail                                  bool
 }
 
 func (f *fakePrimaryMail) Check(context.Context) (*icloud.PrimaryMailInfo, error) {
 	if !f.authenticated {
 		return nil, icloud.ErrPrimaryMailAuthentication
 	}
+	if f.termsRequired {
+		return nil, icloud.ErrHMEWebRepairRequired
+	}
 	return &icloud.PrimaryMailInfo{Exists: f.exists}, nil
 }
 func (f *fakePrimaryMail) Authenticate(context.Context, string, func(context.Context) (string, error)) error {
 	f.auths++
 	f.authenticated = true
+	if f.termsRequired {
+		f.pendingTermsAvailable = true
+		return icloud.ErrHMEWebRepairRequired
+	}
+	return nil
+}
+func (f *fakePrimaryMail) AcceptPendingTerms(context.Context) error {
+	if !f.pendingTermsAvailable {
+		return icloud.ErrHMEWebRepairSessionUnavailable
+	}
+	f.pendingRepairs++
+	f.pendingTermsAvailable = false
+	f.termsRequired = false
+	return nil
+}
+func (f *fakePrimaryMail) AuthenticateAndAcceptTerms(context.Context, string, func(context.Context) (string, error)) error {
+	f.repairs++
+	f.authenticated = true
+	f.pendingTermsAvailable = false
+	f.termsRequired = false
 	return nil
 }
 func (f *fakePrimaryMail) Ensure(_ context.Context, allow bool, checkpoint func(string) error) (*icloud.PrimaryMailInfo, error) {
@@ -81,5 +105,24 @@ func TestPrimaryMailCheckOnlyDoesNotOptExistingAccountIntoAutoCreate(t *testing.
 	}
 	if _, err := mailsetup.Load(dir, "other@example.test"); err == nil {
 		t.Fatal("cross-account state accepted")
+	}
+}
+
+func TestPrimaryMailRepairsWebTermsBeforeCreating(t *testing.T) {
+	dir := t.TempDir()
+	id := "alice@example.test"
+	f := &fakePrimaryMail{authenticated: false, termsRequired: true}
+	r := primaryMailAction(context.Background(), dir, id, "password", nil, false, f)
+	s, err := mailsetup.Load(dir, id)
+	if err != nil || !r.OK || s.Phase != "ready" || s.Email != "alice@icloud.com" || f.auths != 1 || f.pendingRepairs != 1 || f.repairs != 0 || f.creates != 1 {
+		t.Fatalf("pending-repair case: got result=%+v state=%+v auths=%d pendingRepairs=%d repairs=%d creates=%d err=%v", r, s, f.auths, f.pendingRepairs, f.repairs, f.creates, err)
+	}
+
+	dirFallback := t.TempDir()
+	fFallback := &fakePrimaryMail{authenticated: true, termsRequired: true}
+	rFallback := primaryMailAction(context.Background(), dirFallback, id, "password", nil, false, fFallback)
+	sFallback, err := mailsetup.Load(dirFallback, id)
+	if err != nil || !rFallback.OK || sFallback.Phase != "ready" || sFallback.Email != "alice@icloud.com" || fFallback.pendingRepairs != 0 || fFallback.repairs != 1 || fFallback.creates != 1 {
+		t.Fatalf("fallback case: got result=%+v state=%+v pendingRepairs=%d repairs=%d creates=%d err=%v", rFallback, sFallback, fFallback.pendingRepairs, fFallback.repairs, fFallback.creates, err)
 	}
 }

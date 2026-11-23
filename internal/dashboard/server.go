@@ -988,7 +988,7 @@ func (s *Server) startInModeInternal(ctx context.Context, dir string, creds cred
 		}
 	}
 	command.Env = append(command.Env, "APPLESERVICES_APPLEID="+strings.TrimSpace(creds.AppleID))
-	if !resume {
+	if !resume || creds.Password != "" {
 		command.Env = append(command.Env, "APPLESERVICES_PASSWORD="+creds.Password)
 	}
 	command.Stdout, command.Stderr = output, diagnostic

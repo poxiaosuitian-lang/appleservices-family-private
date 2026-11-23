@@ -76,15 +76,16 @@ type hmeSession struct {
 }
 
 type HideMyEmailClient struct {
-	questions   SecurityQuestionsProvider
-	serviceName string // empty preserves the Hide My Email service
-	appleID     string
-	sessionPath string
-	authBase    string
-	setupBase   string
-	http        *http.Client
-	jar         http.CookieJar
-	session     hmeSession
+	questions     SecurityQuestionsProvider
+	serviceName   string // empty preserves the Hide My Email service
+	appleID       string
+	sessionPath   string
+	authBase      string
+	setupBase     string
+	http          *http.Client
+	jar           http.CookieJar
+	session       hmeSession
+	pendingRepair *hmeAuthState
 }
 
 func (c *HideMyEmailClient) SetSecurityQuestionsProvider(provider SecurityQuestionsProvider) {
@@ -111,6 +112,7 @@ func NewHideMyEmailClient(accountDir, appleID string) (*HideMyEmailClient, error
 }
 
 func (c *HideMyEmailClient) resetHTTP() {
+	c.pendingRepair = nil
 	jar, _ := cookiejar.New(nil)
 	transport := gsa.AppleRootTransport().(*http.Transport)
 	transport.Proxy = nil
@@ -291,6 +293,11 @@ func (c *HideMyEmailClient) AuthenticateAndAcceptTerms(ctx context.Context, pass
 // AcceptPendingTerms uses a previously saved, account-bound repair session.
 // It does not authenticate, create aliases, or alter family membership.
 func (c *HideMyEmailClient) AcceptPendingTerms(ctx context.Context) error {
+	if c.pendingRepair != nil {
+		state := c.pendingRepair
+		c.pendingRepair = nil
+		return c.accountLogin(ctx, state, true)
+	}
 	setupBase := c.setupBase
 	locale := "en-us"
 	if strings.EqualFold(c.session.AccountCountry, "CHN") || strings.EqualFold(c.session.AccountCountry, "CN") {
@@ -475,6 +482,7 @@ func (c *HideMyEmailClient) accountLogin(ctx context.Context, state *hmeAuthStat
 	}
 	if result.TermsUpdateNeeded {
 		if !acceptTerms {
+			c.pendingRepair = state
 			return ErrHMEWebRepairRequired
 		}
 		if err := c.acceptHMEWebTerms(ctx, setupBase, result.DSInfo.LanguageCode); err != nil {
@@ -502,8 +510,12 @@ func (c *HideMyEmailClient) accountLogin(ctx context.Context, state *hmeAuthStat
 		return errors.New("iCloud+ Hide My Email is unavailable for this account")
 	}
 	c.session = hmeSession{AppleID: c.appleID, DSID: result.DSInfo.DSID, ClientID: randomHex(16), ServiceURL: strings.TrimRight(result.Webservices[serviceName].URL, "/"), AccountCountry: state.accountCountry}
+	c.pendingRepair = nil
 	serviceURL, _ := url.Parse(c.session.ServiceURL)
 	if err := validateHMEWebCookies(c.jar.Cookies(serviceURL)); err != nil {
+		if errors.Is(err, ErrHMEWebRepairRequired) {
+			c.pendingRepair = state
+		}
 		return err
 	}
 	return c.saveSession()

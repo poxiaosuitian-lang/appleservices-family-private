@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -159,5 +160,67 @@ func TestAcceptPendingTermsRequiresRepairCookie(t *testing.T) {
 	client := &HideMyEmailClient{setupBase: "https://setup.icloud.com/setup/ws/1", http: http.DefaultClient, jar: jar}
 	if err := client.AcceptPendingTerms(context.Background()); !errors.Is(err, ErrHMEWebRepairSessionUnavailable) {
 		t.Fatalf("missing repair session was not rejected: %v", err)
+	}
+}
+
+func TestAcceptPendingTermsUsesInMemoryRepairStateWithoutRelogin(t *testing.T) {
+	var logins, accepted int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/accountLogin":
+			logins++
+			if accepted != 634301 {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"dsInfo":            map[string]any{"dsid": "123", "languageCode": "en-us"},
+					"termsUpdateNeeded": true,
+					"webservices":       map[string]any{"mccgateway": map[string]any{"url": server.URL}},
+				})
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "X-APPLE-WEBAUTH-TOKEN", Value: "web-token", Path: "/"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"dsInfo":            map[string]any{"dsid": "123", "languageCode": "en-us"},
+				"termsUpdateNeeded": false,
+				"webservices":       map[string]any{"mccgateway": map[string]any{"url": server.URL}},
+			})
+		case "/getTerms":
+			_ = json.NewEncoder(w).Encode(map[string]any{"iCloudTerms": map[string]any{"version": 634301}})
+		case "/repairDone":
+			var body struct {
+				Accepted int `json:"acceptedICloudTerms"`
+			}
+			if json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Fatal("repairDone body was not valid JSON")
+			}
+			accepted = body.Accepted
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	jar, _ := cookiejar.New(nil)
+	sessionPath := filepath.Join(t.TempDir(), "primary-mail-session.json")
+	client := &HideMyEmailClient{
+		appleID:     "member@example.test",
+		serviceName: "mccgateway",
+		sessionPath: sessionPath,
+		setupBase:   server.URL,
+		http:        &http.Client{Transport: server.Client().Transport, Jar: jar},
+		jar:         &webSessionJar{CookieJar: jar},
+	}
+	err := client.accountLogin(context.Background(), &hmeAuthState{sessionToken: "sess", accountCountry: "USA", trustToken: "trust"}, false)
+	if !errors.Is(err, ErrHMEWebRepairRequired) || client.pendingRepair == nil {
+		t.Fatalf("expected ErrHMEWebRepairRequired with pendingRepair retained, got err=%v pendingRepair=%v", err, client.pendingRepair != nil)
+	}
+	if err := client.AcceptPendingTerms(context.Background()); err != nil {
+		t.Fatalf("AcceptPendingTerms() failed: %v", err)
+	}
+	if accepted != 634301 || logins != 3 || client.pendingRepair != nil || client.session.DSID != "123" {
+		t.Fatalf("unexpected repair state: accepted=%d logins=%d pendingRepair=%v dsid=%q", accepted, logins, client.pendingRepair != nil, client.session.DSID)
+	}
+	if _, statErr := os.Stat(sessionPath); statErr != nil {
+		t.Fatalf("expected saved session after repair: %v", statErr)
 	}
 }

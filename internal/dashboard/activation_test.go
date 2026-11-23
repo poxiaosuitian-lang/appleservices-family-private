@@ -167,3 +167,25 @@ Account limit reached. status=1
 		}
 	}
 }
+
+func TestActivationDelegateOutcomeClassifiers(t *testing.T) {
+	if !isActivationTermsUpdateRequired([]byte(`icloud: /setup/signin/v2/login refused (HTTP 409) ErrorID=MOBILEME_TERMS_OF_SERVICE_UPDATE protocolVersion=2`)) {
+		t.Fatal("failed to detect MOBILEME_TERMS_OF_SERVICE_UPDATE")
+	}
+	if isActivationTermsUpdateRequired([]byte(`icloud: /setup/signin/v2/login refused (HTTP 401)`)) {
+		t.Fatal("misclassified HTTP 401 as terms update required")
+	}
+	if !isActivationDelegateUnauthorized([]byte(`icloud: /setup/signin/v2/login refused (HTTP 401) ErrorID=UNAUTHORIZED protocolVersion=2`)) {
+		t.Fatal("failed to detect HTTP 401 delegate refusal")
+	}
+	if isActivationDelegateUnauthorized([]byte(`icloud: /setup/signin/v2/login refused (HTTP 409) ErrorID=MOBILEME_TERMS_OF_SERVICE_UPDATE`)) {
+		t.Fatal("misclassified HTTP 409 as unauthorized")
+	}
+	okOutput := []byte("Mac NAC attached; validation-bytes=517\ndelegate accepted; mme-token-present=true\nquota accepted; total-bytes=5368709120; used-bytes=0; paid-bytes=0\n")
+	if !activationDelegateSucceeded(okOutput, nil) {
+		t.Fatal("failed to recognize delegate and quota success")
+	}
+	if activationDelegateSucceeded(okOutput, os.ErrInvalid) || activationDelegateSucceeded([]byte("delegate accepted; mme-token-present=false\nquota accepted;"), nil) {
+		t.Fatal("accepted incomplete delegate output")
+	}
+}

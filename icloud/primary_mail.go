@@ -70,6 +70,17 @@ func (c *PrimaryMailClient) Authenticate(ctx context.Context, password string, c
 	return c.web.Authenticate(ctx, password, code)
 }
 
+func (c *PrimaryMailClient) AcceptPendingTerms(ctx context.Context) error {
+	return c.web.AcceptPendingTerms(ctx)
+}
+
+func (c *PrimaryMailClient) AuthenticateAndAcceptTerms(ctx context.Context, password string, code func(context.Context) (string, error)) error {
+	if password == "" {
+		return ErrPrimaryMailAuthentication
+	}
+	return c.web.AuthenticateAndAcceptTerms(ctx, password, code)
+}
+
 // Check follows Mail's own provisioning test: the authenticated setup response
 // must advertise the mail service. A missing/invalid response is never treated
 // as permission to create. Apple ID login addresses are not mailbox addresses.
