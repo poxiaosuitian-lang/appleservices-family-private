@@ -1540,8 +1540,22 @@ setInterval(poll, 2500);
 setInterval(tickCode, 250);
 window.addEventListener('pagehide', clearCode);
 
-let syncProfiles = [], syncDefaultKeySaved = false, syncConfigBusy = false, syncPending = null, syncImported = null;
+let syncProfiles = [], syncDefaultKeySaved = false, syncTokenEditing = false, syncConfigBusy = false, syncPending = null, syncImported = null;
 let syncProfileLoad = null;
+function syncTokenMode() {
+  const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
+  const unchanged = !!profile && profile.url === $('serverSyncURL').value.trim().replace(/\/+$/, '');
+  const profileSaved = unchanged && !!profile.key_saved;
+  const hasSaved = profileSaved || syncDefaultKeySaved;
+  const showInput = !hasSaved || syncTokenEditing;
+  $('serverSyncToken').hidden = !showInput;
+  $('serverSyncToken').required = !hasSaved;
+  $('serverSyncToken').placeholder = profileSaved ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '请输入此服务器的密钥';
+  $('serverSyncTokenSaved').hidden = showInput;
+  $('serverSyncTokenSavedText').textContent = profileSaved
+    ? '已加密保存，直接点“确认同步”即可（无需填写）'
+    : '已启用默认密钥，留空自动复用（无需填写）';
+}
 function renderSyncVerification(result, preserveSource) {
   const source = $('serverSyncOTPSource');
   const previous = source.value;
@@ -1588,8 +1602,8 @@ function selectSyncProfile(id) {
   $('serverSyncProfile').value = profile?.id || '';
   $('serverSyncURL').value = profile?.url || '';
   $('serverSyncToken').value = '';
-  $('serverSyncToken').required = !profile?.key_saved && !syncDefaultKeySaved;
-  $('serverSyncToken').placeholder = profile?.key_saved ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '';
+  syncTokenEditing = false;
+  syncTokenMode();
   $('serverSyncDelete').disabled = !profile;
   $('serverRecoveryEnabled').checked = profile?.recovery_enabled ?? true;
   $('serverRecoveryStatus').textContent = profile?.recovery_enabled === true
@@ -1663,6 +1677,7 @@ $('serverSyncDialog').addEventListener('close', () => {
     load.abort();
     syncConfigLock(false);
   }
+  syncTokenEditing = false;
   $('serverSyncToken').value = '';
   resetSyncLogin();
 });
@@ -1675,13 +1690,15 @@ $('serverSyncProfile').addEventListener('change', async () => {
   catch (error) { syncFeedback(error.message, true); }
   finally { syncConfigLock(false); }
 });
+$('serverSyncTokenChange').addEventListener('click', () => {
+  syncTokenEditing = true;
+  syncTokenMode();
+  $('serverSyncToken').focus();
+});
 $('serverSyncToken').addEventListener('input', resetSyncLogin);
 $('serverSyncURL').addEventListener('input', () => {
   resetSyncLogin();
-  const profile = syncProfiles.find(item => item.id === $('serverSyncProfile').value);
-  const unchanged = profile?.url === $('serverSyncURL').value.trim().replace(/\/+$/, '');
-  $('serverSyncToken').required = !unchanged && !syncDefaultKeySaved;
-  $('serverSyncToken').placeholder = unchanged ? '已加密保存，留空不更换' : syncDefaultKeySaved ? '留空使用已保存的默认密钥' : '请输入此服务器的密钥';
+  syncTokenMode();
 });
 $('serverSyncSave').addEventListener('click', async () => {
   if (syncConfigBusy || !$('serverSyncForm').reportValidity()) return;

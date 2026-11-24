@@ -725,6 +725,10 @@
     <label for="serverSyncURL">服务器地址</label>
     <input id="serverSyncURL" type="url" placeholder="https://hme.example.com" required>
     <label for="serverSyncToken">专用同步密钥</label>
+    <div id="serverSyncTokenSaved" class="dialog-option-box sync-token-saved" hidden>
+      <span id="serverSyncTokenSavedText">已加密记住默认密钥，无需填写</span>
+      <button class="button button-light sync-token-change" id="serverSyncTokenChange" type="button">更换密钥</button>
+    </div>
     <input id="serverSyncToken" type="password" autocomplete="new-password" minlength="6" maxlength="512" required>
     <p class="cache-note">同步账号并登录 Apple 新通道；需要时将使用本机密码和验证码完成服务器认证。</p>
     <div class="dialog-option-box">
