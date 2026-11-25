@@ -306,36 +306,11 @@ func run() (runErr error) {
 	if err := status.save(*dir); err != nil {
 		return err
 	}
-	var login *appleservices.Login
-	var reconnect reconnectGate
-	if *resumeSession {
-		login, err = resumeSavedLogin(appleID, store, options...)
-		if err == nil {
-			_, err = login.Client()
-			if err == nil {
-				_, err = login.AccountDevices()
-			}
-			if err == nil || deviceAuthenticationExpired(err) {
-				_, err = login.StorageInfo(ctx)
-			}
-		}
-		if reconnect.allow(err, password) {
-			login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
-			*resumeSession = false
-		}
-	} else {
-		login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
-	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	input := bufio.NewReader(os.Stdin)
+	localAvailable := localADI != nil && !*listenOnly
+	renewalMethod := renewalVerificationMethod(*method, localAvailable)
 	localVerificationTried := false
 	verifyLocal := func(candidate *appleservices.Login, method string) {
-		attempted, state, verificationErr := completeLocalVerification(method, localADI != nil && !*listenOnly, candidate, func() (string, error) {
+		attempted, state, verificationErr := completeLocalVerification(method, localAvailable, candidate, func() (string, error) {
 			codeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			return generateCode(codeCtx)
@@ -346,7 +321,39 @@ func run() (runErr error) {
 			fmt.Fprintln(os.Stderr, "Local device verification requires manual completion; no automatic retry.")
 		}
 	}
-	verifyLocal(login, *method)
+	startedAsResume := *resumeSession
+	verifiedOnStartup := false
+	var login *appleservices.Login
+	var reconnect reconnectGate
+	if *resumeSession {
+		var stillResumed bool
+		login, stillResumed, err = resumeWithReconnect(ctx,
+			func() (*appleservices.Login, error) {
+				return resumeSavedLogin(appleID, store, options...)
+			},
+			func() (*appleservices.Login, error) {
+				candidate, loginErr := appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+				if loginErr == nil {
+					verifyLocal(candidate, renewalMethod)
+					verifiedOnStartup = true
+				}
+				return candidate, loginErr
+			},
+			password, &reconnect)
+		*resumeSession = stillResumed
+	} else {
+		login, err = appleservices.BeginLogin(appleservices.Credentials{AppleID: appleID, Password: password}, store, options...)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	input := bufio.NewReader(os.Stdin)
+	if !verifiedOnStartup {
+		verifyLocal(login, *method)
+	}
 	if login.NeedsTwoFactor() && *method == "circle" {
 		if panel == nil || !*guiAuth {
 			return errors.New("Circle login requires the dashboard control API")
@@ -499,9 +506,11 @@ func run() (runErr error) {
 	if err := persistPassword(); err != nil {
 		return err
 	}
-	reconnect.blocked = false
 	deviceManagementExpired := deviceAuthenticationExpired(err)
-	if *resumeSession && !deviceManagementExpired {
+	if !deviceManagementExpired {
+		reconnect.blocked = false
+	}
+	if startedAsResume && !deviceManagementExpired {
 		var storeErr error
 		if passwordRemembered {
 			_, storeErr = login.CheckSkillStoragePurchaseSession(ctx, func() (string, error) {
@@ -595,7 +604,6 @@ func run() (runErr error) {
 	var renewalRecovery renewalRetry
 	defer renewalRecovery.stop()
 	var renewalPending *appleservices.Login
-	renewalMethod := renewalVerificationMethod(*method, localADI != nil && !*listenOnly)
 	renewalFactor := initialVerificationFactor(renewalMethod)
 	var renewalLastSent time.Time
 	prepareRenewal := func(candidate *appleservices.Login) {

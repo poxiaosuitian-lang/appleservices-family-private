@@ -21,6 +21,7 @@ func TestReconnectOnlyAfterExplicitAppleAuthenticationRejection(t *testing.T) {
 	}{
 		{nil, false}, {errors.New("network timed out"), false}, {errors.New("different account"), false},
 		{&gsa.DeviceRequestError{HTTPStatus: 401}, true},
+		{appleservices.ErrDeviceIdentityRefreshRequired, true},
 		{fmt.Errorf("wrapped: %w", &icloud.StorageError{HTTPStatus: 403}), true},
 		{&icloud.DelegateError{HTTPStatus: 401}, true},
 		{errDeviceSessionExpired, true},
@@ -266,4 +267,84 @@ func TestDeviceExpirationAutomaticallyVerifiesBeforeAdoptingRenewal(t *testing.T
 			}
 		})
 	}
+}
+
+func TestStartupResumeAutomaticallyReauthenticatesExpiredDeviceSession(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("saved-password-upgrades-expired-device-session-immediately", func(t *testing.T) {
+		for _, deviceErr := range []error{
+			&gsa.DeviceRequestError{HTTPStatus: 401},
+			appleservices.ErrDeviceIdentityRefreshRequired,
+		} {
+			resumed := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+				account: "owner", listErr: deviceErr,
+			}}
+			freshCandidate := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+				account: "owner", challenge: true,
+			}}
+			freshCalls, localCodes := 0, 0
+			var gate reconnectGate
+			got, stillResumed, err := resumeWithReconnect(ctx,
+				func() (*quotaCheckedLogin, error) { return resumed, nil },
+				func() (*quotaCheckedLogin, error) {
+					freshCalls++
+					localCodes++
+					freshCandidate.challenge = false
+					return freshCandidate, nil
+				},
+				"saved-secret", &gate)
+			if err != nil || stillResumed || got != freshCandidate || freshCalls != 1 || localCodes != 1 {
+				t.Fatalf("startup resume did not auto-relogin expired device session (%v): err=%v stillResumed=%t freshCalls=%d", deviceErr, err, stillResumed, freshCalls)
+			}
+		}
+	})
+
+	t.Run("passwordless-retains-valid-icloud-session", func(t *testing.T) {
+		resumed := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+			account: "owner", listErr: &gsa.DeviceRequestError{HTTPStatus: 401},
+		}}
+		freshCalls := 0
+		var gate reconnectGate
+		got, stillResumed, err := resumeWithReconnect(ctx,
+			func() (*quotaCheckedLogin, error) { return resumed, nil },
+			func() (*quotaCheckedLogin, error) { freshCalls++; return nil, nil },
+			"", &gate)
+		if err != nil || !stillResumed || got != resumed || freshCalls != 0 {
+			t.Fatalf("passwordless startup lost valid iCloud session: err=%v stillResumed=%t freshCalls=%d", err, stillResumed, freshCalls)
+		}
+	})
+
+	t.Run("unverified-2fa-retains-valid-icloud-session-without-loop", func(t *testing.T) {
+		resumed := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+			account: "owner", listErr: &gsa.DeviceRequestError{HTTPStatus: 401},
+		}}
+		challenged := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+			account: "owner", challenge: true,
+		}}
+		var gate reconnectGate
+		got, stillResumed, err := resumeWithReconnect(ctx,
+			func() (*quotaCheckedLogin, error) { return resumed, nil },
+			func() (*quotaCheckedLogin, error) { return challenged, nil },
+			"saved-secret", &gate)
+		if err != nil || !stillResumed || got != resumed || !gate.blocked {
+			t.Fatalf("unverified startup fallback broke valid iCloud session or left gate open: err=%v stillResumed=%t blocked=%t", err, stillResumed, gate.blocked)
+		}
+	})
+
+	t.Run("transient-login-failure-retains-valid-icloud-and-unblocks-retry", func(t *testing.T) {
+		resumed := &quotaCheckedLogin{fakeMaintainedLogin: fakeMaintainedLogin{
+			account: "owner", listErr: &gsa.DeviceRequestError{HTTPStatus: 401},
+		}}
+		var gate reconnectGate
+		got, stillResumed, err := resumeWithReconnect(ctx,
+			func() (*quotaCheckedLogin, error) { return resumed, nil },
+			func() (*quotaCheckedLogin, error) {
+				return nil, &gsa.AuthenticationError{HTTPStatus: 503}
+			},
+			"saved-secret", &gate)
+		if err != nil || !stillResumed || got != resumed || gate.blocked {
+			t.Fatalf("transient startup fallback broke valid iCloud session or blocked retry: err=%v stillResumed=%t blocked=%t", err, stillResumed, gate.blocked)
+		}
+	})
 }

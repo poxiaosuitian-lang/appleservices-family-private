@@ -18,6 +18,56 @@ type loginPasswordStore interface {
 	SaveLoginPassword(string, string) error
 }
 
+type startupLogin interface {
+	NeedsTwoFactor() bool
+	Client() (*appleservices.Client, error)
+	AccountDevices() ([]appleservices.AccountDevice, error)
+	StorageInfo(context.Context) (*appleservices.StorageInfo, error)
+}
+
+func resumeWithReconnect[T startupLogin](ctx context.Context, resume, fresh func() (T, error), password string, gate *reconnectGate) (login T, resumed bool, err error) {
+	var zero T
+	resumed = true
+	login, err = resume()
+	var deviceErr error
+	if err == nil {
+		_, err = login.Client()
+		if err == nil {
+			_, deviceErr = login.AccountDevices()
+			if deviceErr != nil && !deviceAuthenticationExpired(deviceErr) {
+				err = deviceErr
+			}
+		}
+		if err == nil {
+			_, err = login.StorageInfo(ctx)
+		}
+	}
+	reconnectErr := err
+	if reconnectErr == nil && deviceAuthenticationExpired(deviceErr) {
+		reconnectErr = errDeviceSessionExpired
+	}
+	if !gate.allow(reconnectErr, password) {
+		return login, resumed, err
+	}
+	candidate, freshErr := fresh()
+	if freshErr == nil {
+		if err != nil || !candidate.NeedsTwoFactor() {
+			return candidate, false, nil
+		}
+		// Keep the verified iCloud session online instead of stalling background
+		// startup on an interactive 2FA prompt; gate.blocked prevents retries.
+		return login, true, nil
+	}
+	if err != nil {
+		return zero, false, freshErr
+	}
+	gate.deferHandshakeRetry(freshErr, time.Now())
+	if transientLoginFailure(freshErr) {
+		gate.blocked = false
+	}
+	return login, true, nil
+}
+
 func renewWithReconnect(begin, fresh func() (maintainedLogin, error), accountID string, registration appleservices.DeviceRegistration, register bool, password string, gate *reconnectGate) (maintainedLogin, []appleservices.AccountDevice, error) {
 	login, devices, err := renewSessionMode(begin, accountID, registration, register)
 	if gate.allow(err, password) {
@@ -122,6 +172,9 @@ func savedLoginPassword(store any, appleID string) string {
 // Password authentication is a fallback for explicit authentication rejection,
 // never for timeouts, network errors, rate limits, or a changed account binding.
 func sessionAuthenticationRejected(err error) bool {
+	if errors.Is(err, appleservices.ErrDeviceIdentityRefreshRequired) {
+		return true
+	}
 	status := 0
 	var device *gsa.DeviceRequestError
 	var storage *icloud.StorageError
