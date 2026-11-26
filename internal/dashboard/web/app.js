@@ -71,8 +71,9 @@ const time = value => {
   if (!value || value.startsWith('0001')) return '—';
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Singapore', hour12: false }).format(new Date(value));
 };
-async function api(path, data, { signal } = {}) {
-  const suffix = path === 'view' && !selectedAccount ? '' : (selectedAccount ? '?account=' + encodeURIComponent(selectedAccount) : '');
+async function api(path, data, { signal, account } = {}) {
+  const targetAccount = account !== undefined ? account : selectedAccount;
+  const suffix = path === 'view' && !targetAccount ? '' : (targetAccount ? '?account=' + encodeURIComponent(targetAccount) : '');
   const response = await fetch('/api/' + path + suffix, {
     method: data === undefined ? 'GET' : 'POST',
     headers: { 'X-App-Token': token, 'Content-Type': 'application/json' },
@@ -632,6 +633,19 @@ function renderAccounts(view) {
       familyInfo = null; familyAccount = ''; familyCheckedAt = ''; familyStale = false;
       storageAccount = ''; storageCheckedAt = ''; planAccount = ''; planCheckedAt = '';
       purchaseAction = ''; purchaseLabel = ''; activationInfo = null; activationAccount = '';
+      current = {
+        accounts: current?.accounts || accounts,
+        selected: account.id,
+        account: account.account || '',
+        icloud_activated: !!account.icloud_activated,
+        family_stale: !!account.family_stale,
+        status: {
+          running: !!account.running,
+          authenticated: !!account.authenticated,
+          state: account.state || ''
+        },
+        devices: []
+      };
       $('purchaseButton').textContent = '开通 iCloud+ · 50GB';
       $('appPasswordInput').value = '';
       renderAppPassword(null, false);
@@ -640,6 +654,7 @@ function renderAccounts(view) {
       renderPlans(null);
       resetHME();
       clearCode();
+      render(current);
       poll({ fresh: true });
     });
     list.append(item);
@@ -753,6 +768,7 @@ function renderSecurityQuestions(view, ready) {
 }
 
 function render(view) {
+  if (view === current && selectedAccount && view?.selected && view.selected !== selectedAccount) return;
   current = view;
   renderLoginState();
   selectedAccount = view.selected || selectedAccount;
@@ -1089,13 +1105,13 @@ async function action(name, extra = {}, options = {}) {
   document.body.classList.add('busy');
   if (familyAction) $('familyCard').classList.add('is-loading');
   if (hmeAction) $('hmeCard').classList.add('is-loading');
-  if (current) render(current);
+  if (current && current.selected === selectedAccount) render(current);
   try {
-    const result = await api('action', { action: name, ...extra });
+    const result = await api('action', { action: name, ...extra }, { account: actionAccount });
     if (name.startsWith('app-password-') && current && actionAccount === selectedAccount && actionPID === (current.status?.pid || 0)) {
       current.app_password = result.app_password || {state: result.ok ? 'unknown' : 'failed', message: result.message || '应用专用密码状态尚未确认'};
     }
-    if (result.family) {
+    if (result.family && actionAccount === selectedAccount) {
       const checkedAt = new Date().toISOString();
       if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
       renderFamily(result.family, { checkedAt, stale: false });
@@ -1146,7 +1162,7 @@ async function action(name, extra = {}, options = {}) {
       if (purchaseRequest || name === 'storage-purchase-prepare-us') $('planSummary').textContent = (result.message || '购买请求未完成') + detail;
       throw new Error((result.message || '操作未完成') + detail);
     }
-    if (result.activation) {
+    if (result.activation && actionAccount === selectedAccount) {
       activationInfo = result.activation;
       activationAccount = selectedAccount;
       if (current && result.activation.completed) { current.icloud_activated = true; current.activation_ready = false; }
@@ -1162,39 +1178,45 @@ async function action(name, extra = {}, options = {}) {
       if (current) { current.storage = result.storage; current.storage_checked_at = checkedAt; current.storage_stale = false; }
       renderStorage(result.storage, { checkedAt, stale: false });
     }
-    if (result.storage_plan) {
+    if (result.storage_plan && actionAccount === selectedAccount) {
       const checkedAt = new Date().toISOString();
       if (current) { current.storage_plan = result.storage_plan; current.storage_plan_checked_at = checkedAt; current.storage_plan_stale = false; }
       renderPlans(result.storage_plan, { checkedAt, stale: false });
     }
-    if (result.hide_my_email) renderHME(result.hide_my_email);
-    if (result.stage === 'hme-forward-pending') $('hmeSummary').textContent = result.message;
-    if (result.stage === 'hme-reachable-code') { $('hmeReachableCodeForm').hidden = false; $('hmeReachableEmail').readOnly = true; $('hmeReachableCode').focus(); }
-    if (['hme-reachable-completed', 'hme-reachable-added'].includes(result.stage)) { $('hmeReachableCodeForm').hidden = true; $('hmeReachableEmail').readOnly = false; $('hmeReachableCode').value = ''; }
-    if (result.hme_candidate) showHMECandidate(result.hme_candidate);
-    if (name === 'hme-reserve') showHMECandidate('');
+    if (result.hide_my_email && actionAccount === selectedAccount) renderHME(result.hide_my_email);
+    if (actionAccount === selectedAccount) {
+      if (result.stage === 'hme-forward-pending') $('hmeSummary').textContent = result.message;
+      if (result.stage === 'hme-reachable-code') { $('hmeReachableCodeForm').hidden = false; $('hmeReachableEmail').readOnly = true; $('hmeReachableCode').focus(); }
+      if (['hme-reachable-completed', 'hme-reachable-added'].includes(result.stage)) { $('hmeReachableCodeForm').hidden = true; $('hmeReachableEmail').readOnly = false; $('hmeReachableCode').value = ''; }
+      if (result.hme_candidate) showHMECandidate(result.hme_candidate);
+      if (name === 'hme-reserve') showHMECandidate('');
+    }
     if (result.family) {
       if (name === 'family-remove-member') activity('家庭成员已移出并完成双边核验');
       else if (result.family.member) activity('家庭成员状态已确认');
       if (result.family.storage_participating) activity('家庭共享储存已启用');
     }
-    if (result.purchase) {
+    if (result.purchase && actionAccount === selectedAccount) {
       $('planSummary').textContent = purchaseOutcomeMessage(result);
     }
     if (name === 'family-add-self' && !result.family) {
-      const readback = await api('action', { action: 'family-info' });
+      const readback = await api('action', { action: 'family-info' }, { account: actionAccount });
       if (!readback.ok || !readback.family?.member || readback.family.self !== 1) throw new Error(readback.message || '家庭加入后的目标账号回读未完成');
       result.family = readback.family;
       let checkedAt = new Date().toISOString();
-      if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
-      renderFamily(result.family, { checkedAt, stale: false });
+      if (actionAccount === selectedAccount) {
+        if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
+        renderFamily(result.family, { checkedAt, stale: false });
+      }
       if (result.family.storage_known && result.family.storage_available && !result.family.storage_participating) {
-        const joined = await api('action', { action: 'family-join-storage' });
+        const joined = await api('action', { action: 'family-join-storage' }, { account: actionAccount });
         if (!joined.ok || !joined.family?.storage_participating || !joined.family?.storage_enabled) throw new Error(joined.message || '已加入家庭，但共享储存尚未生效');
         result.family = joined.family;
         checkedAt = new Date().toISOString();
-        if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
-        renderFamily(result.family, { checkedAt, stale: false });
+        if (actionAccount === selectedAccount) {
+          if (current) { current.family = result.family; current.family_checked_at = checkedAt; current.family_stale = false; }
+          renderFamily(result.family, { checkedAt, stale: false });
+        }
         result.message = '池内账号已加入家庭并启用共享 iCloud+ 储存';
       }
     }
@@ -1202,7 +1224,7 @@ async function action(name, extra = {}, options = {}) {
     if (result.code && (!result.account_id || result.account_id === actionAccount) && actionAccount === selectedAccount && actionPID === (current?.status?.pid || 0) && actionVerificationContext === verificationContext) showCode(result);
     else if (!options.silent && result.stage === 'device_identity_refresh_required') notice(result.message || '设备管理需要重新验证', true);
     else if (!options.silent && result.message) notice(result.message);
-    await poll();
+    await poll({ fresh: true });
     return result;
   } catch (error) {
     if (options.autoKey) { autoRefreshState.set(options.autoKey, 'failed'); markAutoRefreshAttempt(options.autoKey, 'failed'); }
@@ -1215,7 +1237,7 @@ async function action(name, extra = {}, options = {}) {
     document.body.classList.remove('busy');
     if (familyAction) $('familyCard').classList.remove('is-loading');
     if (hmeAction) $('hmeCard').classList.remove('is-loading');
-    if (current) render(current);
+    if (current && current.selected === selectedAccount) render(current);
   }
 }
 

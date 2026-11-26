@@ -298,6 +298,12 @@ func TestUniquePoolOrganizerRequiresOneMatchingFamily(t *testing.T) {
 	if got := uniquePoolOrganizer(current, candidates); got != nil {
 		t.Fatalf("ambiguous organizer accepted: %#v", got)
 	}
+	member.AppleID = "child@example.test"
+	candidates[0].family.MemberHashes = []string{accountBindingHash("organizer@example.test"), accountBindingHash("child@example.test")}
+	candidates[2].family.MemberHashes = []string{accountBindingHash("other@example.test"), accountBindingHash("stranger@example.test")}
+	if got := uniquePoolOrganizerFor(member, current, candidates); got != organizer {
+		t.Fatalf("member_hashes failed to disambiguate matching-size families: %#v", got)
+	}
 }
 
 func TestFamilyRemovalTargetRequiresExactNonOrganizerAccount(t *testing.T) {
@@ -312,6 +318,18 @@ func TestFamilyRemovalTargetRequiresExactNonOrganizerAccount(t *testing.T) {
 		if got, err := familyRemovalTarget(organizer, invalid, accounts); err == nil || got != nil {
 			t.Fatalf("invalid target %q accepted as %#v", invalid, got)
 		}
+	}
+}
+
+func TestFamilyRemovalFailureMessageSurfacesAppleDeactivatedFreeze(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "daemon.err.log"), []byte("gsa: ec=-20755 This Apple Account is not active\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	target := &Account{ID: "07-account", Dir: dir}
+	msg := familyRemovalFailureMessage("family member removal returned HTTP 422 response-keys=status,status-message status=1,status-message=This action cannot be completed at this time.", target)
+	if !strings.Contains(msg, "已被 Apple 风控停用") {
+		t.Fatalf("unexpected deactivated freeze message: %q", msg)
 	}
 }
 

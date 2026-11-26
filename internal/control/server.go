@@ -107,9 +107,10 @@ type FamilyInfo struct {
 	Children               int    `json:"children"`
 	Invitations            int    `json:"invitations"`
 	Pending                int    `json:"pending"`
-	Organizer              bool   `json:"organizer"`
-	OrganizerAccount       string `json:"organizer_account,omitempty"`
-	OrganizerName          string `json:"organizer_name,omitempty"`
+	Organizer              bool     `json:"organizer"`
+	OrganizerAccount       string   `json:"organizer_account,omitempty"`
+	OrganizerName          string   `json:"organizer_name,omitempty"`
+	MemberHashes           []string `json:"member_hashes,omitempty"`
 	StorageKnown           bool   `json:"storage_known"`
 	StorageParticipating   bool   `json:"storage_participating"`
 	StorageAvailable       bool   `json:"storage_available"`

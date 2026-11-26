@@ -34,6 +34,16 @@ func validCachedFamily(value *control.FamilyInfo) bool {
 	if len(value.OrganizerName) > 128 || strings.ContainsAny(value.OrganizerName, "\r\n\x00") {
 		return false
 	}
+	if len(value.MemberHashes) > 20 {
+		return false
+	}
+	for _, hash := range value.MemberHashes {
+		if hash == "" || len(hash) > 64 || strings.IndexFunc(hash, func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_')
+		}) >= 0 {
+			return false
+		}
+	}
 	return true
 }
 

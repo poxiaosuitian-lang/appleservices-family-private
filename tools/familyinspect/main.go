@@ -61,8 +61,9 @@ type safeFamilySummary struct {
 	Children               int   `json:"children"`
 	Invitations            int   `json:"invitations"`
 	Pending                int   `json:"pending"`
-	Organizer              bool  `json:"organizer"`
-	StorageKnown           bool  `json:"storage_known"`
+	Organizer              bool     `json:"organizer"`
+	MemberHashes           []string `json:"member_hashes,omitempty"`
+	StorageKnown           bool     `json:"storage_known"`
 	StorageParticipating   bool  `json:"storage_participating"`
 	StorageAvailable       bool  `json:"storage_available"`
 	StorageEnabled         bool  `json:"storage_enabled"`
@@ -75,7 +76,9 @@ type safeFamilySummary struct {
 
 func decodeObject(data []byte) (map[string]any, error) {
 	var value map[string]any
-	if json.Unmarshal(data, &value) == nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err == nil && value != nil {
 		return value, nil
 	}
 	if _, err := plist.Unmarshal(data, &value); err == nil {
@@ -118,6 +121,8 @@ func stringValue(v any) string {
 func numericIDValue(v any) string {
 	var value string
 	switch x := v.(type) {
+	case json.Number:
+		value = strings.TrimSpace(x.String())
 	case string:
 		value = strings.TrimSpace(x)
 	case int:
@@ -175,6 +180,9 @@ func summarizeFamilyMembers(members []any) (organizers, children, me int, selfOr
 
 func integerValue(v any) int64 {
 	switch x := v.(type) {
+	case json.Number:
+		value, _ := x.Int64()
+		return value
 	case int:
 		return int64(x)
 	case int64:
@@ -1085,41 +1093,163 @@ func run() error {
 		if targetMatches != 1 || targetDSID == "" {
 			return errors.New("target pool member is not uniquely bound to the current family")
 		}
-		removeURL, removeErr := appleEndpoint(stringValue(urls["removeFromFamily"]))
-		if removeErr != nil {
-			return errors.New("Apple bag did not return a valid family removal endpoint")
-		}
-		removeBody, encodeErr := plist.Marshal(map[string]any{"member-dsid": targetDSID}, plist.XMLFormat)
-		targetDSID = ""
-		if encodeErr != nil {
-			return errors.New("cannot encode bound family removal request")
-		}
-		removeRequest, requestErr := newFamilyRequest(removeURL.String(), false)
-		if requestErr != nil {
-			return requestErr
-		}
-		removeRequest.Method = http.MethodPost
-		removeRequest.Body = io.NopCloser(bytes.NewReader(removeBody))
-		removeRequest.ContentLength = int64(len(removeBody))
-		removeRequest.Header.Set("Content-Type", "application/x-plist")
-		removeRequest.Header.Set("Accept", "application/json, text/plist, application/x-plist")
-		removeResponse, removeRequestErr := apiClient.Do(removeRequest)
-		for index := range removeBody {
-			removeBody[index] = 0
-		}
-		if removeRequestErr == nil {
-			removeData, readErr := io.ReadAll(io.LimitReader(removeResponse.Body, (2<<20)+1))
-			removeResponse.Body.Close()
-			if readErr != nil || len(removeData) > 2<<20 || removeResponse.StatusCode != http.StatusOK {
-				return fmt.Errorf("family member removal returned HTTP %d", removeResponse.StatusCode)
-			}
-			if len(bytes.TrimSpace(removeData)) > 0 {
-				removed, decodeErr := decodeObject(removeData)
-				if decodeErr == nil && familyResponseError(removed) {
-					return errors.New("Apple returned an application error for family member removal")
+		var removeDiagnostic string
+		var removeRequestErr error
+		primaryAccepted := false
+		if removeURL, removeErr := appleEndpoint(stringValue(urls["removeFromFamily"])); removeErr == nil {
+			if removeBody, encodeErr := plist.Marshal(map[string]any{"member-dsid": targetDSID}, plist.XMLFormat); encodeErr == nil {
+				if removeRequest, requestErr := newFamilyRequest(removeURL.String(), false); requestErr == nil {
+					removeRequest.Method = http.MethodPost
+					removeRequest.Body = io.NopCloser(bytes.NewReader(removeBody))
+					removeRequest.ContentLength = int64(len(removeBody))
+					removeRequest.Header.Set("Content-Type", "application/x-plist")
+					removeRequest.Header.Set("Accept", "application/json, text/plist, application/x-plist")
+					removeResponse, doErr := apiClient.Do(removeRequest)
+					for index := range removeBody {
+						removeBody[index] = 0
+					}
+					if doErr == nil {
+						removeData, readErr := io.ReadAll(io.LimitReader(removeResponse.Body, (2<<20)+1))
+						removeResponse.Body.Close()
+						if readErr == nil && len(removeData) <= 2<<20 && removeResponse.StatusCode == http.StatusOK {
+							if len(bytes.TrimSpace(removeData)) == 0 {
+								primaryAccepted = true
+							} else if removed, decodeErr := decodeObject(removeData); decodeErr == nil {
+								removeDiagnostic = fmt.Sprintf("keys=%s %s", strings.Join(sortedMapKeys(removed), ","), safeFamilyStatus(removed))
+								statusVal, hasStatus := removed["status"]
+								if !familyResponseError(removed) && (!hasStatus || fmt.Sprint(statusVal) == "0") {
+									primaryAccepted = true
+								}
+							}
+						}
+					} else {
+						removeRequestErr = doErr
+					}
 				}
 			}
 		}
+		if !primaryAccepted {
+			macDetailsURL, macDetailsErr := appleEndpoint("https://setup.icloud.com/setup/mac/family/getFamilyDetails")
+			if macDetailsErr != nil {
+				return macDetailsErr
+			}
+			macDetailsReq, macReqErr := newFamilyRequest(macDetailsURL.String(), false)
+			if macReqErr != nil {
+				return macReqErr
+			}
+			macDetailsReq.Method = http.MethodGet
+			macDetailsReq.Body = nil
+			macDetailsReq.Header.Set("Accept", "application/json; charset=UTF-8")
+			macDetailsReq.Header.Set("X-APNS-Push-Token", strings.ToUpper(fmt.Sprintf("%x", hardware.Push.Token)))
+			macDetailsReq.Header.Set("X-Mme-Setup-FCE048DE-F34F-4FAF-A6DD-6C8AC9DF0C54", "true")
+			macDetailsReq.Header.Set("X-MMe-Client-Info", "<MacBookPro15,1> <Mac OS X;13.1.0;22C65> <webclient/edf0ea6503b1 (com.apple.systempreferences.AppleIDSettings/1)>")
+			macDetailsResp, macDoErr := apiClient.Do(macDetailsReq)
+			if macDoErr != nil {
+				return fmt.Errorf("mac family details transport failed: %w", macDoErr)
+			}
+			macDetailsData, macReadErr := readLimited(macDetailsResp)
+			if macReadErr != nil {
+				return macReadErr
+			}
+			macDetails, macDecodeErr := decodeObject(macDetailsData)
+			if macDecodeErr != nil || !boolValue(macDetails["isMemberOfFamily"]) {
+				return errors.New("mac family details did not confirm active family membership")
+			}
+			macFamily, _ := macDetails["family"].(map[string]any)
+			macMembers, _ := macDetails["familyMembers"].([]any)
+			familyETag := ""
+			if rawETag, ok := macFamily["etag"]; ok && rawETag != nil {
+				if numericETag := numericIDValue(rawETag); numericETag != "" {
+					familyETag = numericETag
+				} else {
+					familyETag = strings.TrimSpace(fmt.Sprint(rawETag))
+				}
+			}
+			if familyETag == "" {
+				familyETag = strings.TrimSpace(macDetailsResp.Header.Get("ETag"))
+			}
+			organizerDSID := numericIDValue(macFamily["organizer"])
+			var targetMemberRecord map[string]any
+			macTargetMatches := 0
+			for _, rawMacMember := range macMembers {
+				macMember, _ := rawMacMember.(map[string]any)
+				if macMember == nil {
+					continue
+				}
+				memberDSID := numericIDValue(macMember["dsid"])
+				memberEmail := familyMemberAppleID(macMember)
+				if memberDSID != targetDSID && !strings.EqualFold(memberEmail, target.AppleID) {
+					continue
+				}
+				if memberDSID != targetDSID || (memberEmail != "" && !strings.EqualFold(memberEmail, target.AppleID)) {
+					return errors.New("mac family member record disagreed with Fresno member binding")
+				}
+				if organizerDSID != "" && memberDSID == organizerDSID {
+					return errors.New("refusing to remove family organizer")
+				}
+				macTargetMatches++
+				targetMemberRecord = macMember
+			}
+			if macTargetMatches != 1 || targetMemberRecord == nil {
+				return errors.New("mac family details did not uniquely match target pool member")
+			}
+			removeURL, removeErr := appleEndpoint("https://setup.icloud.com/setup/mac/family/removeFamilyMember")
+			if removeErr != nil {
+				return removeErr
+			}
+			removeBody, encodeErr := json.Marshal(targetMemberRecord)
+			targetMemberRecord = nil
+			if encodeErr != nil {
+				targetDSID = ""
+				return errors.New("cannot encode bound family removal request")
+			}
+			removeRequest, requestErr := newFamilyRequest(removeURL.String(), false)
+			if requestErr != nil {
+				targetDSID = ""
+				return requestErr
+			}
+			removeRequest.Method = http.MethodPost
+			removeRequest.Body = io.NopCloser(bytes.NewReader(removeBody))
+			removeRequest.ContentLength = int64(len(removeBody))
+			removeRequest.Header.Set("Content-Type", "application/json")
+			removeRequest.Header.Set("Accept", "application/json; charset=UTF-8")
+			removeRequest.Header.Set("X-APNS-Push-Token", strings.ToUpper(fmt.Sprintf("%x", hardware.Push.Token)))
+			removeRequest.Header.Set("X-Mme-Setup-FCE048DE-F34F-4FAF-A6DD-6C8AC9DF0C54", "true")
+			removeRequest.Header.Set("X-MMe-Client-Info", "<MacBookPro15,1> <Mac OS X;13.1.0;22C65> <webclient/edf0ea6503b1 (com.apple.systempreferences.AppleIDSettings/1)>")
+			if familyETag != "" {
+				removeRequest.Header.Set("If-Match", familyETag)
+			}
+			removeResponse, doErr := apiClient.Do(removeRequest)
+			removeRequestErr = doErr
+			for index := range removeBody {
+				removeBody[index] = 0
+			}
+			if doErr == nil {
+				removeData, readErr := io.ReadAll(io.LimitReader(removeResponse.Body, (2<<20)+1))
+				removeResponse.Body.Close()
+				if readErr != nil || len(removeData) > 2<<20 {
+					targetDSID = ""
+					return errors.New("family member removal response is invalid")
+				}
+				if removeResponse.StatusCode != http.StatusOK {
+					targetDSID = ""
+					if failed, decodeErr := decodeObject(removeData); decodeErr == nil {
+						return fmt.Errorf("family member removal returned HTTP %d response-keys=%s %s", removeResponse.StatusCode, strings.Join(sortedMapKeys(failed), ","), safeFamilyStatus(failed))
+					}
+					return fmt.Errorf("family member removal returned HTTP %d bytes=%d", removeResponse.StatusCode, len(removeData))
+				}
+				if len(bytes.TrimSpace(removeData)) > 0 {
+					if removed, decodeErr := decodeObject(removeData); decodeErr == nil {
+						removeDiagnostic = fmt.Sprintf("keys=%s %s", strings.Join(sortedMapKeys(removed), ","), safeFamilyStatus(removed))
+						if familyResponseError(removed) {
+							targetDSID = ""
+							return fmt.Errorf("Apple returned an application error for family member removal (%s)", strings.TrimSpace(removeDiagnostic))
+						}
+					}
+				}
+			}
+		}
+		targetDSID = ""
 		var verified map[string]any
 		confirmed := false
 		for attempt := 0; attempt < 4 && !confirmed; attempt++ {
@@ -1154,7 +1284,7 @@ func run() error {
 			if removeRequestErr != nil {
 				return fmt.Errorf("family member removal transport failed and current family still includes the target: %w", removeRequestErr)
 			}
-			return errors.New("family member removal was not confirmed by current organizer state")
+			return fmt.Errorf("family member removal was not confirmed by current organizer state (%s)", strings.TrimSpace(removeDiagnostic))
 		}
 		details = verified
 		members, _ = details["family-members"].([]any)
@@ -1664,6 +1794,21 @@ func run() error {
 		fmt.Printf("shared iCloud+ member join verified; HTTP=%d participating=true available=true enabled=true\n", updateResponse.StatusCode)
 	}
 	if *safeJSON {
+		var memberHashes []string
+		if boolValue(details["is-member-of-family"]) {
+			seenHashes := map[string]bool{}
+			for _, raw := range members {
+				member, _ := raw.(map[string]any)
+				if id := familyMemberAppleID(member); id != "" {
+					h := accountBindingHash(id)
+					if !seenHashes[h] {
+						seenHashes[h] = true
+						memberHashes = append(memberHashes, h)
+					}
+				}
+			}
+			sort.Strings(memberHashes)
+		}
 		summary := safeFamilySummary{
 			Member:           boolValue(details["is-member-of-family"]),
 			Eligible:         eligible,
@@ -1675,6 +1820,7 @@ func run() error {
 			Invitations:      len(invites),
 			Pending:          len(pending),
 			Organizer:        selfOrganizer,
+			MemberHashes:     memberHashes,
 		}
 		if selfMember != nil {
 			summary.PurchaseSharingEnabled, summary.PurchaseSharingKnown = findFamilyBool(selfMember, func(key string) bool {

@@ -96,6 +96,40 @@ const web = path.join(__dirname, '../internal/dashboard/web');
     assert.deepEqual(await page.locator('#familyOrganizer option').evaluateAll(es => es.map(e => e.value)), ['']);
     assert.deepEqual(await page.locator('#accountList .account-role').allTextContents(), ['子号']);
     assert.deepEqual(actions, []);
+
+    // Switching from a child account to a mother account and immediately clicking
+    // "读取 Apple 状态" while /api/view is still in flight must never jump back to child.
+    let delayMotherView = true;
+    const actionAccounts = [];
+    await page.unroute('**/*');
+    await page.route('**/*', async route => {
+      const u = new URL(route.request().url());
+      if (u.hostname !== 'dashboard.test') return route.abort();
+      if (u.pathname === '/api/view') {
+        const reqAcc = u.searchParams.get('account') || 'mother';
+        if (reqAcc === 'mother' && delayMotherView) await new Promise(r => setTimeout(r, 150));
+        return route.fulfill({json:{...view, selected:reqAcc, family:reqAcc === 'mother' ? organizer : null}});
+      }
+      if (u.pathname === '/api/action') {
+        actionAccounts.push({account:u.searchParams.get('account'), body:route.request().postDataJSON()});
+        return route.fulfill({json:{ok:true, family:organizer, message:'Apple 已返回当前家庭状态'}});
+      }
+      return route.abort();
+    });
+    view.accounts[0].icloud_plus = true;
+    view.accounts[0].family_organizer = true;
+    view.selected = 'child';
+    await update();
+    assert.equal(await page.evaluate(() => selectedAccount), 'child');
+    await page.locator('#accountList .account-item').first().click();
+    assert.equal(await page.evaluate(() => selectedAccount), 'mother');
+    await page.locator('#familyRefreshButton').click();
+    await page.waitForFunction(() => !busy);
+    delayMotherView = false;
+    assert.equal(await page.evaluate(() => selectedAccount), 'mother');
+    assert.deepEqual(actionAccounts, [{account:'mother', body:{action:'family-info'}}]);
+    assert.equal(await page.locator('#familyRole').textContent(), '组织者');
+
     assert.deepEqual(errors, []);
     console.log('family status UI regressions passed');
   } finally { await browser.close(); }

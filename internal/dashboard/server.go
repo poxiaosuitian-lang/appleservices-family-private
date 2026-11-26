@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -530,14 +532,52 @@ type familyCandidate struct {
 	family  *control.FamilyInfo
 }
 
+func accountBindingHash(appleID string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(appleID))
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 func uniquePoolOrganizer(current *control.FamilyInfo, candidates []familyCandidate) *Account {
+	return uniquePoolOrganizerFor(nil, current, candidates)
+}
+
+func uniquePoolOrganizerFor(memberAccount *Account, current *control.FamilyInfo, candidates []familyCandidate) *Account {
 	if current == nil || !current.Member {
 		return nil
+	}
+	targetHash := ""
+	if memberAccount != nil {
+		targetHash = accountBindingHash(memberAccount.AppleID)
+	}
+	if targetHash != "" {
+		var exact *Account
+		for _, candidate := range candidates {
+			family := candidate.family
+			if candidate.account == nil || family == nil || !family.Member || !family.Organizer || family.Organizers != 1 || len(family.MemberHashes) == 0 {
+				continue
+			}
+			if slices.Contains(family.MemberHashes, targetHash) {
+				if exact != nil && exact.ID != candidate.account.ID {
+					return nil
+				}
+				exact = candidate.account
+			}
+		}
+		if exact != nil {
+			return exact
+		}
 	}
 	var match *Account
 	for _, candidate := range candidates {
 		family := candidate.family
 		if candidate.account == nil || family == nil || !family.Member || !family.Organizer || family.Organizers != 1 || family.Members != current.Members {
+			continue
+		}
+		if targetHash != "" && len(family.MemberHashes) > 0 && !slices.Contains(family.MemberHashes, targetHash) {
 			continue
 		}
 		if current.StorageKnown && family.StorageKnown && current.StorageBytes > 0 && family.StorageBytes > 0 && current.StorageBytes != family.StorageBytes {
@@ -570,19 +610,63 @@ func (s *Server) refreshPoolFamilyMembers(ctx context.Context, helper string, or
 	s.accountsMu.Unlock()
 	var wait sync.WaitGroup
 	for _, candidate := range accounts {
-		if candidate == organizer || !acceptedCheckpointReady(candidate.Dir, candidate.AppleID) {
+		if candidate == nil || candidate == organizer {
 			continue
 		}
 		wait.Add(1)
 		go func(account *Account) {
 			defer wait.Done()
-			readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			family, err := runFamilyStatus(readCtx, helper, account, false)
+			targetHash := accountBindingHash(account.AppleID)
+			hashKnown := len(current.MemberHashes) > 0 && targetHash != ""
+			inOrganizerFamily := hashKnown && slices.Contains(current.MemberHashes, targetHash)
+
+			var family *control.FamilyInfo
+			var err error
+			if acceptedCheckpointReady(account.Dir, account.AppleID) {
+				readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				family, err = runFamilyStatus(readCtx, helper, account, false)
+				cancel()
+			} else {
+				err = errors.New("checkpoint unavailable")
+			}
 			if err != nil {
+				if inOrganizerFamily {
+					cached, _, _ := readFamilyCache(account)
+					if cached == nil {
+						cached = &control.FamilyInfo{
+							Member:           true,
+							Members:          current.Members,
+							Organizers:       current.Organizers,
+							Self:             1,
+							StorageKnown:     current.StorageKnown,
+							StorageAvailable: current.StorageAvailable,
+							StorageEnabled:   current.StorageEnabled,
+							StorageBytes:     current.StorageBytes,
+						}
+					} else {
+						cached.Member = true
+						cached.Members = current.Members
+					}
+					cached.Organizer = false
+					cached.OrganizerAccount, cached.OrganizerName = organizer.ID, organizer.Name
+					_, _ = writeFamilyCache(account, cached)
+				} else if hashKnown {
+					if cached, _, _ := readFamilyCache(account); cached != nil && cached.OrganizerAccount == organizer.ID {
+						cached.OrganizerAccount, cached.OrganizerName = "", ""
+						_, _ = writeFamilyCache(account, cached)
+					}
+				}
 				return
 			}
-			if sameFamilySummary(current, family) {
+			if family.Organizer {
+				family.OrganizerAccount, family.OrganizerName = account.ID, account.Name
+			} else if hashKnown {
+				if inOrganizerFamily {
+					family.OrganizerAccount, family.OrganizerName = organizer.ID, organizer.Name
+				} else if family.OrganizerAccount == organizer.ID {
+					family.OrganizerAccount, family.OrganizerName = "", ""
+				}
+			} else if sameFamilySummary(current, family) {
 				family.OrganizerAccount, family.OrganizerName = organizer.ID, organizer.Name
 			}
 			_, _ = writeFamilyCache(account, family)
@@ -629,7 +713,7 @@ func (s *Server) resolveFamilyOrganizer(ctx context.Context, helper string, curr
 	for candidate := range results {
 		candidates = append(candidates, candidate)
 	}
-	if organizer := uniquePoolOrganizer(current, candidates); organizer != nil {
+	if organizer := uniquePoolOrganizerFor(currentAccount, current, candidates); organizer != nil {
 		current.OrganizerAccount, current.OrganizerName = organizer.ID, organizer.Name
 	}
 }
@@ -650,7 +734,7 @@ func (s *Server) resolveCachedFamilyOrganizer(currentAccount *Account, current *
 			candidates = append(candidates, familyCandidate{account: account, family: family})
 		}
 	}
-	if organizer := uniquePoolOrganizer(current, candidates); organizer != nil {
+	if organizer := uniquePoolOrganizerFor(currentAccount, current, candidates); organizer != nil {
 		current.OrganizerAccount, current.OrganizerName = organizer.ID, organizer.Name
 	}
 }
@@ -670,6 +754,7 @@ func (s *Server) familyAction(ctx context.Context, account *Account, joinStorage
 		return control.Result{Message: err.Error(), Stage: "family-action"}
 	}
 	if family.Organizer {
+		family.OrganizerAccount, family.OrganizerName = account.ID, account.Name
 		s.refreshPoolFamilyMembers(actionCtx, helper, account, family)
 	} else {
 		s.resolveFamilyOrganizer(actionCtx, helper, account, family)
@@ -689,6 +774,20 @@ func (s *Server) familyAction(ctx context.Context, account *Account, joinStorage
 		message += " · 已保存 " + checkedAt.Local().Format("15:04")
 	}
 	return control.Result{OK: true, Message: message, Stage: stage, Family: family}
+}
+
+func familyRemovalFailureMessage(output string, target *Account) string {
+	switch {
+	case strings.Contains(output, "child-account removal is unsupported"):
+		return "Apple 不允许直接移出儿童账号，需先转移至其他家庭组"
+	case strings.Contains(output, "This action cannot be completed at this time."), strings.Contains(output, "You do not have the proper privileges to perform this action."):
+		if target != nil && strings.Contains(lastProcessError(filepath.Join(target.Dir, "daemon.err.log")), "已被 Apple 风控停用") {
+			return "Apple 服务端拒绝移出该成员（This action cannot be completed at this time.）：目标子号已被 Apple 风控停用，Apple 当前冻结了该家庭成员的变更"
+		}
+		return "Apple 服务端拒绝移出该成员（当前家庭组或成员状态受限，Apple 暂不允许执行此操作）"
+	default:
+		return "成员移除未完成；请先重新读取双方状态，不要重复提交"
+	}
 }
 
 func familyRemovalTarget(organizer *Account, targetID string, accounts []*Account) (*Account, error) {
@@ -720,8 +819,11 @@ func (s *Server) removeFamilyMember(ctx context.Context, organizer *Account, tar
 	if err != nil {
 		return control.Result{Message: err.Error(), Stage: "family-binding"}
 	}
-	if !acceptedCheckpointReady(organizer.Dir, organizer.AppleID) || !acceptedCheckpointReady(target.Dir, target.AppleID) {
-		return control.Result{Message: "母号或目标成员尚未完成 iCloud 激活", Stage: "family-preflight"}
+	if !acceptedCheckpointReady(organizer.Dir, organizer.AppleID) || strings.TrimSpace(target.AppleID) == "" {
+		return control.Result{Message: "母号尚未完成 iCloud 激活或目标成员缺少有效会话", Stage: "family-preflight"}
+	}
+	if _, statErr := os.Stat(filepath.Join(target.Dir, "session.json")); statErr != nil {
+		return control.Result{Message: "目标成员缺少本地会话绑定", Stage: "family-preflight"}
 	}
 	helper := filepath.Join(filepath.Dir(s.config.Worker), "familyinspect.exe")
 	if info, statErr := os.Stat(helper); statErr != nil || !info.Mode().IsRegular() {
@@ -736,7 +838,7 @@ func (s *Server) removeFamilyMember(ctx context.Context, organizer *Account, tar
 	command.Stdout = &output
 	command.Stderr = &output
 	if runErr := command.Run(); runErr != nil {
-		return control.Result{Message: "成员移除未完成；请先重新读取双方状态，不要重复提交", Stage: "family-remove"}
+		return control.Result{Message: familyRemovalFailureMessage(output.String(), target), Stage: "family-remove"}
 	}
 	organizerFamily, parseErr := parseFamilyStatus(output.String())
 	if parseErr != nil || !organizerFamily.Member || !organizerFamily.Organizer || organizerFamily.Organizers != 1 || organizerFamily.Self != 1 {
@@ -748,7 +850,21 @@ func (s *Server) removeFamilyMember(ctx context.Context, organizer *Account, tar
 	targetCtx, targetCancel := context.WithTimeout(actionCtx, 35*time.Second)
 	targetFamily, targetErr := runFamilyStatus(targetCtx, helper, target, false)
 	targetCancel()
-	if targetErr != nil || targetFamily.Member {
+	if targetErr != nil {
+		targetHash := accountBindingHash(target.AppleID)
+		if targetHash != "" && len(organizerFamily.MemberHashes) > 0 && !slices.Contains(organizerFamily.MemberHashes, targetHash) {
+			_, targetCacheErr := writeFamilyCache(target, &control.FamilyInfo{Member: false})
+			message := "成员已移出家庭，并通过母号状态回读确认（目标账号当前离线或受限，已同步更新本地状态）"
+			stage := "family-member-removed"
+			if organizerCacheErr != nil || targetCacheErr != nil {
+				message += "；本地缓存未完整保存，请重新读取状态"
+				stage = "family-remove-cache-warning"
+			}
+			return control.Result{OK: true, Message: message, Stage: stage, Family: organizerFamily}
+		}
+		return control.Result{Message: "母号已确认成员移除，但目标账号回读未完成；请刷新目标账号，不要重复移除", Stage: "family-remove-target-readback", Family: organizerFamily}
+	}
+	if targetFamily.Member {
 		return control.Result{Message: "母号已确认成员移除，但目标账号回读未完成；请刷新目标账号，不要重复移除", Stage: "family-remove-target-readback", Family: organizerFamily}
 	}
 	_, targetCacheErr := writeFamilyCache(target, targetFamily)
