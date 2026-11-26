@@ -804,6 +804,11 @@ func (s *Server) snapshotFor(ctx context.Context, id string) view {
 		result.Launching, result.Message = account.launching, account.message
 		account.mu.Unlock()
 	}
+	if !result.Launching && !result.Status.Running && result.Status.State == "failed" && result.Message == "" {
+		if detail := lastProcessError(filepath.Join(dir, "daemon.err.log")); detail != "" {
+			result.Message = "后台异常停止，请重新连接：" + detail
+		}
+	}
 	result.Accounts = s.listAccounts(ctx)
 	result.Selected = id
 	if account != nil {
@@ -1060,6 +1065,10 @@ func lastProcessError(path string) string {
 			return "Apple 登录服务暂时不可用（HTTP 503），请稍后重新连接"
 		case strings.Contains(line, "saved login session cannot be restored"), strings.Contains(line, "saved device session was not accepted"), strings.Contains(line, "saved iCloud session was not accepted"), strings.Contains(line, "saved login session is incomplete"):
 			return "Apple 已保存会话失效，请输入当前账号密码重新连接"
+		case strings.Contains(line, "ec=-20755") || strings.Contains(line, "This Apple Account is not active") || strings.Contains(line, "Your account is disabled"):
+			return "该 Apple 账户已被 Apple 风控停用（账户当前未处于激活状态），请前往 iforgot.apple.com 申请恢复访问权限"
+		case strings.Contains(line, "ec=-20209") || strings.Contains(line, "locked for security"):
+			return "该 Apple 账户已因安全原因被锁定，请前往 iforgot.apple.com 解锁后再重新连接"
 		case strings.Contains(line, "ec=-22406") && strings.Contains(line, "correct password"):
 			return "Apple 拒绝了当前密码，请确认使用的是这个账号的最新密码，并关闭密码管理器的旧自动填充"
 		case strings.Contains(line, "ec=-22981") && strings.Contains(line, "tooManyCodesSent=true"):
@@ -1126,6 +1135,12 @@ func (s *Server) Bootstrap(ctx context.Context, appleID, password string, resume
 		for _, account := range accounts {
 			if ctx.Err() != nil || s.accountStatus(account).Running || !savedLoginReady(account.Dir, account.AppleID) {
 				continue
+			}
+			if s.readStatusFrom(account.Dir).State == "failed" {
+				detail := lastProcessError(filepath.Join(account.Dir, "daemon.err.log"))
+				if strings.Contains(detail, "已被 Apple 风控停用") || strings.Contains(detail, "因安全原因被锁定") {
+					continue
+				}
 			}
 			result := s.startSavedAccount(ctx, account)
 			if !result.OK && result.Message != "正在启动，请稍等" {

@@ -236,6 +236,39 @@ func TestLastProcessErrorSeparatesAcceptedCodeFromDelegateRefusal(t *testing.T) 
 	}
 }
 
+func TestLastProcessErrorMapsDeactivatedAndLockedAccountsWithoutExposingLog(t *testing.T) {
+	for _, tc := range []struct {
+		line      string
+		wantSub   string
+		forbidden []string
+	}{
+		{
+			line:      "trusted-device: gsa: init rejected (ec=-20755) — server said: This Apple Account is not active.",
+			wantSub:   "已被 Apple 风控停用",
+			forbidden: []string{"-20755", "not active", "trusted-device"},
+		},
+		{
+			line:      "trusted-device: gsa: complete rejected (ec=-20209) — server said: This Apple Account has been locked for security reasons.",
+			wantSub:   "因安全原因被锁定",
+			forbidden: []string{"-20209", "locked for security", "trusted-device"},
+		},
+	} {
+		path := filepath.Join(t.TempDir(), "worker.err")
+		if err := os.WriteFile(path, []byte(tc.line+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got := lastProcessError(path)
+		if !strings.Contains(got, tc.wantSub) {
+			t.Fatalf("expected %q in %q", tc.wantSub, got)
+		}
+		for _, raw := range tc.forbidden {
+			if strings.Contains(got, raw) {
+				t.Fatalf("raw diagnostic %q leaked in %q", raw, got)
+			}
+		}
+	}
+}
+
 func TestParseFamilyStatusUsesOnlyMarkedRedactedJSON(t *testing.T) {
 	output := "helper diagnostic\n" + familyStatusPrefix + `{"member":true,"members":3,"organizers":1,"self":1,"storage_known":true,"storage_participating":true,"storage_available":true,"storage_enabled":true,"storage_bytes":53687091200}` + "\n"
 	status, err := parseFamilyStatus(output)
