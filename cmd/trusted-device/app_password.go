@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -105,6 +106,11 @@ func appPasswordAction(ctx context.Context, dir, appleID, password, manual strin
 		}
 	}
 	entries, err := client.ListAppSpecificPasswords(ctx)
+	if errors.Is(err, icloud.ErrAccountManagementAuthenticationRequired) && password != "" {
+		if client.Authenticate(ctx, password, code) == nil {
+			entries, err = client.ListAppSpecificPasswords(ctx)
+		}
+	}
 	if err != nil {
 		return finish("verification_required", "Apple 未允许读取应用专用密码列表，请完成账户验证或从官网配置")
 	}
@@ -152,4 +158,97 @@ func normalizeAppPassword(value string) string {
 		return value[:4] + "-" + value[4:8] + "-" + value[8:12] + "-" + value[12:]
 	}
 	return value
+}
+
+func nextAppPasswordLabel(entries []icloud.AppSpecificPassword) string {
+	taken := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		taken[strings.ToLower(strings.TrimSpace(entry.Label))] = true
+	}
+	if !taken[strings.ToLower(appPasswordLabel)] {
+		return appPasswordLabel
+	}
+	for n := 2; n <= 25; n++ {
+		candidate := fmt.Sprintf("%s-%d", appPasswordLabel, n)
+		if !taken[strings.ToLower(candidate)] {
+			return candidate
+		}
+	}
+	return appPasswordLabel
+}
+
+func rotateAppPassword(ctx context.Context, dir, appleID, password string, vault appPasswordVault, portal func() (appPasswordPortal, error), code func(context.Context) (string, error)) (*appPasswordRecord, control.Result) {
+	finish := func(state, label, message string) (*appPasswordRecord, control.Result) {
+		if label == "" {
+			label = appPasswordLabel
+		}
+		status := &apppassword.Status{State: state, Message: message, Label: label}
+		_ = apppassword.Save(dir, appleID, status)
+		return nil, control.Result{OK: state == "ready", Message: message, Stage: "app-password", AppPassword: status}
+	}
+	if strings.TrimSpace(password) == "" {
+		return finish("verification_required", appPasswordLabel, "原应用专用密码已失效；请先点击“重新登录”加载当前密码后自动重新生成")
+	}
+	if vault.CheckAppPasswordStorage(appleID) != nil {
+		return finish("failed", appPasswordLabel, "本机加密存储不可用，未重新生成应用专用密码")
+	}
+	client, err := portal()
+	if err != nil {
+		return finish("failed", appPasswordLabel, "无法初始化 Apple 账户管理会话，未重新生成应用专用密码")
+	}
+	if client.Resume(ctx) != nil {
+		if client.Authenticate(ctx, password, code) != nil {
+			if diag, ok := client.(interface{ AuthenticationFailure() (string, int) }); ok {
+				stage, status := diag.AuthenticationFailure()
+				fmt.Fprintf(os.Stderr, "App password portal auth failed: stage=%s http=%d\n", stage, status)
+			}
+			return finish("verification_required", appPasswordLabel, "原应用专用密码已失效，且本机保存的登录密码未通过 Apple 验证；请先点击“重新登录”更新当前账号密码后再同步")
+		}
+	}
+	entries, err := client.ListAppSpecificPasswords(ctx)
+	if errors.Is(err, icloud.ErrAccountManagementAuthenticationRequired) {
+		if client.Authenticate(ctx, password, code) != nil {
+			if diag, ok := client.(interface{ AuthenticationFailure() (string, int) }); ok {
+				stage, status := diag.AuthenticationFailure()
+				fmt.Fprintf(os.Stderr, "App password portal reauth failed: stage=%s http=%d\n", stage, status)
+			}
+			return finish("verification_required", appPasswordLabel, "原应用专用密码已失效，且本机保存的登录密码未通过 Apple 验证；请先点击“重新登录”更新当前账号密码后再同步")
+		}
+		entries, err = client.ListAppSpecificPasswords(ctx)
+	}
+	if err != nil {
+		return finish("verification_required", appPasswordLabel, "原应用专用密码已失效，且无法读取 Apple 应用专用密码列表；请先重新登录账号后再同步")
+	}
+	if len(entries) >= 25 {
+		return finish("verification_required", appPasswordLabel, "Apple 应用专用密码数量已达上限（25 个），请在官网清理后再同步")
+	}
+	label := nextAppPasswordLabel(entries)
+	intent := &apppassword.Status{State: "pending", Message: "原应用专用密码已失效，正在自动重新生成", Label: label}
+	if apppassword.Save(dir, appleID, intent) != nil {
+		return nil, control.Result{Message: "无法保存应用专用密码更新任务", Stage: "app-password-state"}
+	}
+	generated, err := client.CreateAppSpecificPassword(ctx, label, password)
+	if err != nil {
+		var failure *icloud.AppSpecificPasswordError
+		if errors.As(err, &failure) && failure.Code == "password-rejected" {
+			return finish("verification_required", label, "本机保存的登录密码已被更改，请先点击“重新登录”输入最新密码后再同步")
+		}
+		if errors.As(err, &failure) && !failure.CreationUncertain {
+			return finish("verification_required", label, "Apple 未完成新应用专用密码验证，请重新登录账号或从官网配置")
+		}
+		return finish("unknown", label, "新应用专用密码生成结果未确认，请在官网核对")
+	}
+	if generated != nil {
+		generated.Password = normalizeAppPassword(generated.Password)
+	}
+	if generated == nil || !validAppPassword(generated.Password) || generated.ID == "" {
+		return finish("unknown", label, "Apple 返回的新应用专用密码不完整，请在官网核对")
+	}
+	record := &appPasswordRecord{Password: generated.Password, Label: label, ID: generated.ID, CreatedAt: time.Now().UTC()}
+	if vault.SaveAppPassword(appleID, record) != nil {
+		return finish("unknown", label, "Apple 已生成新应用专用密码，但本机保存失败")
+	}
+	status := &apppassword.Status{State: "ready", Message: "已自动重新生成并保存应用专用密码", Label: label}
+	_ = apppassword.Save(dir, appleID, status)
+	return record, control.Result{OK: true, Message: status.Message, Stage: "app-password", AppPassword: status}
 }

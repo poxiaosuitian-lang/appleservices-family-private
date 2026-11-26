@@ -218,3 +218,41 @@ func TestAppPasswordFailedManualSavePreservesUncertainGeneration(t *testing.T) {
 		})
 	}
 }
+
+type rotatingAppPortal struct {
+	fakeAppPortal
+	listAuthOnce bool
+	createdLabel string
+}
+
+func (p *rotatingAppPortal) ListAppSpecificPasswords(context.Context) ([]icloud.AppSpecificPassword, error) {
+	if p.listAuthOnce {
+		p.listAuthOnce = false
+		return nil, &icloud.AppSpecificPasswordError{Code: "authentication-required", HTTPStatus: 401}
+	}
+	return p.list, nil
+}
+
+func (p *rotatingAppPortal) CreateAppSpecificPassword(_ context.Context, label, _ string) (*icloud.AppSpecificPassword, error) {
+	p.creates++
+	p.createdLabel = label
+	if p.createErr != nil {
+		return nil, p.createErr
+	}
+	return &icloud.AppSpecificPassword{ID: "2", Label: label, Password: "qrstuvwxyzabcdef"}, nil
+}
+
+func TestRotateAppPasswordReauthenticatesAndAvoidsExistingLabel(t *testing.T) {
+	dir := t.TempDir()
+	vault := &fakeAppVault{record: &appPasswordRecord{Password: testAppSecret, Label: appPasswordLabel, ID: "1"}}
+	portal := &rotatingAppPortal{
+		fakeAppPortal: fakeAppPortal{list: []icloud.AppSpecificPassword{{ID: "1", Label: appPasswordLabel}}},
+		listAuthOnce:  true,
+	}
+	rotated, res := rotateAppPassword(context.Background(), dir, "owner@example.test", "primary-secret", vault, func() (appPasswordPortal, error) {
+		return portal, nil
+	}, nil)
+	if !res.OK || rotated == nil || rotated.Password != "qrst-uvwx-yzab-cdef" || portal.createdLabel != "icloud-hme-2" {
+		t.Fatalf("unexpected rotation outcome: rotated=%+v res=%+v label=%q", rotated, res, portal.createdLabel)
+	}
+}

@@ -20,6 +20,16 @@ const Path = "/api/integrations/appleservices/accounts"
 
 var ErrSyncUnauthorized = errors.New("同步密钥不匹配，请将本机和服务器设置为同一密钥（HTTP 401/403）")
 var ErrRecoveryBinding = errors.New("账号尚未完成服务器同步，请先确认同步（HTTP 409）")
+var ErrSyncVerificationFailed = errors.New("服务器未通过账号会话或 IMAP 收信验证，未完成导入")
+
+type VerificationFailureError struct {
+	Code string
+}
+
+func (e *VerificationFailureError) Error() string { return ErrSyncVerificationFailed.Error() }
+func (e *VerificationFailureError) Is(target error) bool {
+	return target == ErrSyncVerificationFailed
+}
 
 type Payload struct {
 	Version     int               `json:"version"`
@@ -85,6 +95,8 @@ func importWithClient(ctx context.Context, base, token string, payload Payload, 
 		return "", errors.New("未收到同步结果，请先在服务器核对账号；不会自动重试")
 	}
 	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
+	defer clear(raw)
 	switch resp.StatusCode {
 	case 401, 403:
 		return "", ErrSyncUnauthorized
@@ -95,13 +107,18 @@ func importWithClient(ctx context.Context, base, token string, payload Payload, 
 	case 409:
 		return "", errors.New("服务器账号绑定冲突，请核对已有账号")
 	case 422:
-		return "", errors.New("服务器未通过账号会话或 IMAP 收信验证，未完成导入")
+		var errWire struct {
+			Code string `json:"code"`
+		}
+		code := ""
+		if json.Unmarshal(raw, &errWire) == nil && regexp.MustCompile(`^[A-Z0-9_]{1,64}$`).MatchString(errWire.Code) {
+			code = errWire.Code
+		}
+		return "", &VerificationFailureError{Code: code}
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		return "", errors.New("服务器未确认导入成功，请核对服务器账号；不会自动重试")
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
-	defer clear(raw)
 	var result struct {
 		Success bool `json:"success"`
 		Data    struct {

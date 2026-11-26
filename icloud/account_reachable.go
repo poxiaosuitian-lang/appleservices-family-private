@@ -187,7 +187,10 @@ func (c *AppleAccountClient) authHeaders(state *hmeAuthState) http.Header {
 	h.Set("X-Apple-Locale", "zh_CN")
 	h.Set("X-Apple-Offer-Security-Upgrade", "1")
 	h.Set("X-Apple-Privacy-Consent", "true")
-	h.Set("X-Apple-I-FD-Client-Info", hmeFDClientInfo())
+	if state.fdClientInfo == "" {
+		state.fdClientInfo = hmeFDClientInfo()
+	}
+	h.Set("X-Apple-I-FD-Client-Info", state.fdClientInfo)
 	h.Set("X-Requested-With", "XMLHttpRequest")
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
@@ -230,6 +233,12 @@ func (c *AppleAccountClient) Authenticate(ctx context.Context, password string, 
 	if password == "" {
 		return ErrAccountManagementAuthenticationRequired
 	}
+	jar, _ := cookiejar.New(nil)
+	c.jar = jar
+	if c.http != nil {
+		c.http.Jar = jar
+	}
+	c.apiBase, c.apiKey, c.portalSCNT = "", "", ""
 	c.lastStage, c.lastHTTP = "bootstrap", 0
 	bootstrapRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://appleid.apple.com/bootstrap/portal", nil)
 	bootstrapRequest.Header.Set("Accept", "application/json")

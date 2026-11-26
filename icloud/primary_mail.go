@@ -46,6 +46,7 @@ func (c *PrimaryMailClient) SetSecurityQuestionsProvider(provider SecurityQuesti
 
 type PrimaryMailInfo struct {
 	Exists bool   `json:"exists"`
+	Status string `json:"status,omitempty"`
 	Email  string `json:"email,omitempty"`
 }
 
@@ -103,11 +104,11 @@ func (c *PrimaryMailClient) Check(ctx context.Context) (*PrimaryMailInfo, error)
 	if result.TermsUpdateNeeded {
 		return nil, ErrHMEWebRepairRequired
 	}
-	if mailURL := result.Webservices["mail"].URL; mailURL != "" {
-		if !appleMailServiceURL(mailURL) {
+	if mail := result.Webservices["mail"]; mail.URL != "" {
+		if !appleMailServiceURL(mail.URL) {
 			return nil, errors.New("Apple 返回的邮箱服务地址无效，未确认邮箱状态")
 		}
-		return &PrimaryMailInfo{Exists: true}, nil
+		return &PrimaryMailInfo{Exists: true, Status: mail.Status}, nil
 	}
 	gateway := result.Webservices["mccgateway"].URL
 	if !appleMailServiceURL(gateway) {

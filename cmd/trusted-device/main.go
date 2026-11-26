@@ -302,6 +302,36 @@ func run() (runErr error) {
 		}
 		return aps.CodeFromProcess(codeCtx, *codeProvider, codeRequest(device))
 	}
+	var lastAutoCodeMu sync.Mutex
+	var lastAutoCode string
+	var lastAutoCodeAt time.Time
+	uniqueGenerateCode := func(codeCtx context.Context) (string, error) {
+		lastAutoCodeMu.Lock()
+		defer lastAutoCodeMu.Unlock()
+		deadline := time.Now().Add(33 * time.Second)
+		for {
+			code, codeErr := generateCode(codeCtx)
+			if codeErr != nil {
+				return "", codeErr
+			}
+			trimmed := strings.TrimSpace(code)
+			if trimmed == "" || trimmed != lastAutoCode || time.Since(lastAutoCodeAt) >= 32*time.Second {
+				lastAutoCode = trimmed
+				lastAutoCodeAt = time.Now()
+				return code, nil
+			}
+			if time.Now().After(deadline) {
+				lastAutoCode = trimmed
+				lastAutoCodeAt = time.Now()
+				return code, nil
+			}
+			select {
+			case <-codeCtx.Done():
+				return "", codeCtx.Err()
+			case <-time.After(time.Second):
+			}
+		}
+	}
 	status.State = "signing_in"
 	if err := status.save(*dir); err != nil {
 		return err
@@ -731,7 +761,7 @@ func run() (runErr error) {
 			}
 			hmeClient.SetSecurityQuestionsProvider(securityAnswers)
 		}
-		return loadSyncHMESession(actionCtx, hmeClient, password, generateCode)
+		return loadSyncHMESession(actionCtx, hmeClient, password, uniqueGenerateCode)
 	}
 	loadHME := func(actionCtx context.Context) (*icloud.HideMyEmailInfo, error) {
 		if err := requireHMEAccess(actionCtx, *dir, active); err != nil {
@@ -787,7 +817,7 @@ func run() (runErr error) {
 			if action == "hme-server-login-device" {
 				result, err = hmesync.VerifyDeviceCode(queryCtx, commandNote, commandCode, appleID, commandLabel, visibleRequestID)
 			} else {
-				result, err = hmesync.Login(queryCtx, commandNote, commandCode, appleID, password, commandLabel, visibleRequestID, generateCode)
+				result, err = hmesync.Login(queryCtx, commandNote, commandCode, appleID, password, commandLabel, visibleRequestID, uniqueGenerateCode)
 			}
 			if err != nil {
 				return control.Result{Message: err.Error(), Stage: "hme-server-login"}
@@ -837,11 +867,40 @@ func run() (runErr error) {
 			if len(name) > 64 {
 				name = mailbox
 			}
-			id, err := hmesync.Import(queryCtx, commandNote, commandCode, hmesync.Payload{Version: 1, SourceID: hmesync.SourceID(appleID), AppleID: appleID, Name: name, ICloudEmail: mailbox, Host: host, Cookies: cookies, AppPassword: record.Password})
-			if err != nil {
-				return control.Result{Message: err.Error(), Stage: "hme-server-sync"}
+			payload := hmesync.Payload{Version: 1, SourceID: hmesync.SourceID(appleID), AppleID: appleID, Name: name, ICloudEmail: mailbox, Host: host, Cookies: cookies, AppPassword: record.Password}
+			id, err := hmesync.Import(queryCtx, commandNote, commandCode, payload)
+			var rotatedRes control.Result
+			if errors.Is(err, hmesync.ErrSyncVerificationFailed) && (record.CreatedAt.IsZero() || time.Since(record.CreatedAt) > 5*time.Minute) {
+				var rotated *appPasswordRecord
+				rotated, rotatedRes = rotateAppPassword(queryCtx, *dir, appleID, password, store, func() (appPasswordPortal, error) {
+					portal, portalErr := icloud.NewAppleAccountClientWithStore(*dir, appleID)
+					if portalErr == nil {
+						portal.SetSecurityQuestionsProvider(securityAnswers)
+					}
+					return portal, portalErr
+				}, uniqueGenerateCode)
+				if rotated == nil {
+					rotatedRes.Stage = "hme-server-sync"
+					return rotatedRes
+				}
+				// Allow Apple's directory a brief propagation window before the remote
+				// server verifies the newly created app-specific password over IMAP.
+				select {
+				case <-queryCtx.Done():
+					return control.Result{Message: "同步已取消", Stage: "hme-server-sync", AppPassword: rotatedRes.AppPassword}
+				case <-time.After(4 * time.Second):
+				}
+				payload.AppPassword = rotated.Password
+				id, err = hmesync.Import(queryCtx, commandNote, commandCode, payload)
 			}
-			return control.Result{OK: true, Message: "服务器已导入账号，隐藏邮箱和 IMAP 均已验证 · " + id, Stage: "hme-server-sync"}
+			if err != nil {
+				var vf *hmesync.VerificationFailureError
+				if errors.As(err, &vf) && vf.Code != "" {
+					fmt.Fprintf(os.Stderr, "Server sync 422 code=%s mailbox=%s host=%s\n", vf.Code, mailbox, host)
+				}
+				return control.Result{Message: err.Error(), Stage: "hme-server-sync", AppPassword: rotatedRes.AppPassword}
+			}
+			return control.Result{OK: true, Message: "服务器已导入账号，隐藏邮箱和 IMAP 均已验证 · " + id, Stage: "hme-server-sync", AppPassword: rotatedRes.AppPassword}
 		}
 		if action == "app-password-ensure" || action == "app-password-save" || action == "app-password-auto" {
 			manual := ""
@@ -863,7 +922,7 @@ func run() (runErr error) {
 					portal.SetSecurityQuestionsProvider(securityAnswers)
 				}
 				return portal, err
-			}, generateCode)
+			}, uniqueGenerateCode)
 		}
 		if action == "security-resume" {
 			if err := securityAnswers.resume(); err != nil {

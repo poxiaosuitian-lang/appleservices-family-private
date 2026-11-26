@@ -461,7 +461,8 @@ type hmeAccountLoginResult struct {
 		AppleID      string `json:"appleId"`
 	} `json:"dsInfo"`
 	Webservices map[string]struct {
-		URL string `json:"url"`
+		URL    string `json:"url"`
+		Status string `json:"status"`
 	} `json:"webservices"`
 	TermsUpdateNeeded bool `json:"termsUpdateNeeded"`
 }
